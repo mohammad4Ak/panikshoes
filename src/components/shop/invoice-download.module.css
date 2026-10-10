@@ -1,0 +1,37 @@
+.panel {
+  margin-block-start: 18px;
+  padding: 18px;
+  border: 1px solid rgb(var(--theme-brand-soft, 224 232 220));
+  border-radius: 22px;
+  background: rgb(var(--theme-brand-soft, 242 246 238));
+  color: rgb(var(--theme-ink, 20 33 28));
+}
+
+.row { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
+.mark { display: grid; place-items: center; width: 42px; height: 46px; border-radius: 14px; background: rgb(var(--theme-brand-soft, 226 236 216)); color: rgb(var(--theme-brand, 18 102 74)); flex-shrink: 0; }
+.mark svg { width: 24px; height: 24px; }
+.details { flex: 1; min-width: 160px; }
+.details h3 { font-size: 13px; line-height: 1.8; font-weight: 750; }
+.details p { margin-block-start: 4px; font-size: 10px; line-height: 2; color: rgb(var(--theme-on-soft, 96 112 101)); }
+.number { display: inline-block; font-variant-numeric: tabular-nums; }
+.separator { padding-inline: 7px; }
+.download { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border-radius: 50px; padding: 10px 16px; background: rgb(var(--theme-brand, 18 102 74)); color: white; font-size: 11px; font-weight: 650; white-space: nowrap; transition: background .2s; }
+.download:hover { background: rgb(var(--theme-brand-strong, 12 80 58)); }
+.download:focus-visible { outline: 2px solid rgb(var(--theme-brand, 18 102 74)); outline-offset: 4px; }
+.download:disabled { opacity: .65; cursor: wait; }
+.download svg { width: 18px; height: 18px; }
+.pdf { font-size: 9px; padding-inline-start: 8px; border-inline-start: 1px solid #ffffff35; font-weight: 500; letter-spacing: .3px; }
+.pending { display: flex; align-items: center; gap: 9px; padding-block-start: 16px; margin-block-start: 12px; border-top: 1px solid #e7ece8; color: #708078; font-size: 11px; line-height: 2; }
+.pending svg { width: 19px; height: 19px; flex-shrink: 0; }
+.cancelled, .error { margin-block-start: 12px; padding-block-start: 11px; border-top: 1px solid #e0e8dc; font-size: 11px; line-height: 2; }
+.cancelled { color: #765c38; }
+.error { color: #b42318; }
+
+@media (max-width: 520px) {
+  .panel { padding: 16px; border-radius: 20px; }
+  .details { min-width: 0; }
+  .details p { overflow-wrap: anywhere; }
+  .download { flex: 1 0 100%; margin-block-start: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .download { transition: none; } }

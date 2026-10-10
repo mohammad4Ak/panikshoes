@@ -1,0 +1,290 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String
+  password  String
+  role      Role      @default(USER)
+  phone     String?
+  orders    Order[]
+  addresses Address[]
+  reviews   ProductReview[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  title     String?
+  address   String
+  phone     String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  image     String?
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  name        String
+  slug        String      @unique
+  description String
+  price       Int
+  images      String[]
+  category    Category    @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  type        ShoeType?
+  sizes       Int[]
+  colors      String[]
+  stock       Int         @default(0)
+  featured    Boolean     @default(false)
+  specifications Json    @default("[]")
+  viewCount   Int         @default(0)
+  reviews     ProductReview[]
+  pageViews   PageView[]
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model ProductReview {
+  id             String       @id @default(cuid())
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId      String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  rating         Int
+  comment        String       @default("")
+  status         ReviewStatus @default(PENDING)
+  revision       Int          @default(1)
+  moderationNote String?
+  reviewerId     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([productId, userId])
+  @@index([productId, status, createdAt])
+  @@index([status, updatedAt])
+}
+
+model PageView {
+  id         String   @id
+  visitorId  String
+  pathname   String
+  ipAddress  String?
+  userAgent  String?
+  referrer   String?
+  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([visitorId, createdAt])
+  @@index([visitorId, pathname, createdAt])
+  @@index([productId, createdAt])
+}
+
+model Order {
+  id                 String          @id @default(cuid())
+  user               User            @relation(fields: [userId], references: [id])
+  userId             String
+  items              OrderItem[]
+  invoice            Invoice?
+  total              Int
+  status             OrderStatus     @default(PENDING)
+  recipientName      String?
+  checkoutKey        String?         @unique
+  checkoutFingerprint String?
+  address            String
+  phone              String
+  shippingMethod     ShippingMethod? @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
+  shippingMethodId   String?
+  shippingMethodName String?
+  shippingCost       Int             @default(0)
+  // Zarinpal
+  authority          String?
+  verified           Boolean         @default(false)
+  paymentMethod      String?
+  paymentStatus      PaymentStatus   @default(UNPAID)
+  paymentExpiresAt   DateTime?
+  paymentCardNumber  String?
+  paymentCardholderName String?
+  paymentBankName    String?
+  receipts           PaymentReceipt[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([shippingMethodId])
+  @@index([paymentMethod, paymentStatus, paymentExpiresAt])
+}
+
+model PaymentMethod {
+  id             String   @id
+  name           String
+  description    String?
+  isActive       Boolean  @default(false)
+  cardNumber     String?
+  cardholderName String?
+  bankName       String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model PaymentReceipt {
+  id                String        @id @default(cuid())
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderId           String
+  data              Bytes
+  mimeType          String
+  payerCardLast4    String?
+  transferReference String?
+  submissionKey     String
+  isLate            Boolean       @default(false)
+  status            ReceiptStatus @default(PENDING)
+  reviewNote        String?
+  reviewerId        String?
+  reviewedAt        DateTime?
+  createdAt         DateTime      @default(now())
+
+  @@unique([orderId, submissionKey])
+  @@index([orderId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ShippingMethod {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  description           String?
+  baseCost              Int      @default(0)
+  additionalItemCost    Int      @default(0)
+  freeShippingThreshold Int?
+  isActive              Boolean  @default(false)
+  sortOrder             Int      @default(0)
+  orders                Order[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  productName String?
+  quantity  Int
+  size      Int
+  color     String
+  price     Int
+}
+
+model Invoice {
+  id       Int      @id @default(autoincrement())
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderId  String   @unique
+  issuedAt DateTime @default(now())
+  snapshot Json
+}
+
+// A single store-wide presentation record. The migration constrains id = 1.
+model SiteSettings {
+  id                    Int      @id @default(1)
+  version               Int      @default(1)
+  colorTheme            SiteColorTheme @default(forest)
+  storeName             String
+  tagline               String
+  logoUrl               String?
+  logoLightUrl          String?
+  announcementEnabled   Boolean  @default(false)
+  announcementText      String   @default("")
+  announcementLink      String?
+  announcementLinkLabel String   @default("")
+  homeHeroProductIds    String[] @default([])
+  homeHeroIntervalSeconds Int    @default(10)
+  homeBannerEnabled     Boolean  @default(true)
+  homeBannerImageUrl    String?
+  homeBannerEyebrow     String   @default("از شهر تا مسیرهای تازه")
+  homeBannerTitle       String   @default("مسیر بعدی‌ات از اینجا شروع می‌شه.")
+  homeBannerDescription String   @default("برای قدم‌های هر روز و ماجراجویی‌های آخر هفته، همراهت رو پیدا کن.")
+  homeBannerLink        String?  @default("/products?stock=1")
+  homeBannerLinkLabel   String   @default("کشف مدل‌های موجود")
+  homeBannerImageAlt    String   @default("کفش طبیعت‌گردی در یک مسیر کوهستانی")
+  phone                 String   @default("")
+  email                 String   @default("")
+  address               String   @default("")
+  supportHours          String   @default("")
+  instagramUrl          String?
+  telegramUrl           String?
+  seoTitle              String
+  seoDescription        String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+enum SiteColorTheme {
+  forest
+  honey
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ShoeType {
+  SNEAKER
+  FORMAL
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  AWAITING_RECEIPT
+  AWAITING_REVIEW
+  REJECTED
+  PAID
+  EXPIRED
+}
+
+enum ReceiptStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

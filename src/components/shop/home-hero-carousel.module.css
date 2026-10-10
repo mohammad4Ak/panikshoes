@@ -1,0 +1,39 @@
+/* Fit one canvas to both available axes. Leave room for the rotated backdrop
+   and for caption text to stay readable when the artwork gets small.
+   Every cqi below the frame is relative to that same canvas width. */
+.root { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: 100%; height: 100%; max-width: 560px; min-width: 0; min-height: 0; }
+.imageSlot { display: grid; place-items: center; width: 100%; height: 100%; min-width: 0; min-height: 0; container-type: size; }
+.imageFrame { position: relative; isolation: isolate; width: min(535px, calc(100cqi / 1.1), calc((100cqb - 20px) / 1.27)); aspect-ratio: 25 / 31; min-width: 0; container-type: inline-size; }
+.backdrop { position: absolute; top: 3cqi; left: 0; width: 100%; height: 116cqi; border-radius: 13cqi; background: linear-gradient(145deg, rgb(var(--theme-backdrop-start, 248 250 241)) 0%, rgb(var(--theme-backdrop-mid, 224 235 215)) 52%, rgb(var(--theme-backdrop-end, 199 219 197)) 100%); box-shadow: inset 0 2px 0 #ffffff91, 0 18px 35px rgb(var(--theme-dark-elevated, 32 55 40) / .035); transform: rotate(-8deg); pointer-events: none; z-index: 0; }
+.word { position: absolute; top: 0; left: 2cqi; color: rgb(var(--theme-line, 184 204 181)); opacity: .65; font: italic 900 24cqi / 1 Arial, sans-serif; letter-spacing: -1.8cqi; pointer-events: none; user-select: none; z-index: 1; }
+.root .imageStage { position: absolute; top: 5cqi; left: 4cqi; width: 92cqi; height: 92cqi; border-radius: 6cqi; mix-blend-mode: normal; z-index: 2; }
+.imageSlide { position: absolute; inset: 0; display: block; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .65s ease, visibility .65s; border-radius: inherit; }
+.sticker { position: absolute; top: 26cqi; left: 2cqi; width: 16cqi; height: 16cqi; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5cqi; border-radius: 50%; background: rgb(var(--theme-accent, 215 247 106)); color: rgb(var(--theme-ink, 20 33 28)); font: italic 900 2.5cqi / 1.1 Arial, sans-serif; text-align: center; transform: rotate(-12deg); pointer-events: none; user-select: none; z-index: 3; }
+.sticker svg { width: 4.2cqi; height: 4.2cqi; }
+.root .captionCard { position: absolute; inset: auto; top: 103cqi; left: 5cqi; width: 90cqi; min-width: 0; min-height: clamp(44px, 18cqi, 88px); margin: 0; padding: 2.5cqi 3.5cqi; border-radius: 5cqi; display: flex; align-items: center; direction: rtl; z-index: 5; }
+.captionStage { display: grid; width: 100%; min-width: 0; }
+.captionSlide { grid-area: 1 / 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: max(6px, 2cqi); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .45s ease, visibility .45s; border-radius: 2cqi; }
+.active { opacity: 1; visibility: visible; pointer-events: auto; }
+.captionText { min-width: 0; }
+.root .captionText > span { display: block; font-size: clamp(8px, 1.8cqi, 10px); line-height: 1.4; }
+.root .captionText h2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: clamp(10px, 2.8cqi, 14px); line-height: 1.5; margin-top: 1cqi; }
+.root .captionSlide > span { width: clamp(24px, 8cqi, 42px); height: clamp(24px, 8cqi, 42px); }
+.root .captionSlide > span svg { width: clamp(14px, 4cqi, 24px); height: auto; }
+.controls { position: absolute; top: 5cqi; left: 4cqi; width: 92cqi; height: 92cqi; z-index: 4; pointer-events: none; }
+.controlButton { position: absolute; top: 50%; width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid rgb(var(--theme-brand, 18 102 74) / .12); border-radius: 50%; color: rgb(var(--theme-brand, 18 102 74)); background: #fffffff0; box-shadow: 0 4px 16px rgb(var(--theme-ink, 20 33 28) / .08); transform: translateY(-50%); pointer-events: auto; touch-action: manipulation; transition: background .2s, color .2s; }
+.previous { right: -12px; }
+.next { left: -12px; }
+.controlButton:hover { background: rgb(var(--theme-brand, 18 102 74)); color: #fff; }
+.controlButton:active { transform: translateY(-50%) scale(.94); }
+.controlButton:focus-visible { outline: 2px solid rgb(var(--theme-brand, 18 102 74)); outline-offset: 3px; }
+.imageStage:focus-within { outline: 3px solid rgb(var(--theme-brand, 18 102 74)); outline-offset: 5px; }
+/* Use the desktop's spare horizontal space without stretching the product photo. */
+@media (min-width: 1024px) {
+  .imageFrame { --side-extension: clamp(0px, calc((100vw - 1024px) * .08), 7cqi); }
+  .backdrop { left: calc(-1 * var(--side-extension)); width: calc(100cqi + 2 * var(--side-extension)); }
+  .word, .sticker { left: calc(2cqi - var(--side-extension)); }
+  .root .captionCard { left: calc(5cqi - var(--side-extension)); width: calc(90cqi + 2 * var(--side-extension)); }
+  .controls { left: calc(4cqi - var(--side-extension)); width: calc(92cqi + 2 * var(--side-extension)); }
+}
+@container (max-width: 200px) { .previous { right: -28px; } .next { left: -28px; } .controlButton { top: 58%; } }
+@media (prefers-reduced-motion: reduce) { .imageSlide, .captionSlide, .controlButton { transition: none; } }

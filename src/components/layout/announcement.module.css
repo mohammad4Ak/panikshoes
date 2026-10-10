@@ -1,0 +1,11 @@
+.bar { width: calc(100% - clamp(40px, 6vw, 80px)); max-width: 1360px; margin: 12px auto 0; border: 1px solid rgb(var(--theme-brand-soft, 214 229 216)); border-radius: 20px; background: rgb(var(--theme-brand-soft, 234 243 232)); color: rgb(var(--theme-ink, 37 77 54)); }
+.inner { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 11px 19px; }
+.icon { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 11px; background: #ffffff85; color: rgb(var(--theme-brand, 18 102 74)); }
+.inner p { min-width: 0; font-size: 12px; line-height: 1.9; white-space: pre-line; overflow-wrap: anywhere; }
+.link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex-shrink: 0; max-width: min(360px, 100%); padding: 7px 13px; border: 1px solid rgb(var(--theme-brand, 18 102 74) / 0.12549); border-radius: 999px; color: rgb(var(--theme-brand, 18 102 74)); background: #ffffffa6; font-size: 11px; font-weight: 700; transition: background 160ms ease; }
+.link span { min-width: 0; overflow-wrap: anywhere; }
+.link svg { flex-shrink: 0; }
+.link:hover { background: white; }
+.link:focus-visible { outline: 2px solid rgb(var(--theme-brand, 18 102 74)); outline-offset: 3px; }
+@media (max-width: 760px) { .bar { margin-top: 10px; border-radius: 18px; } .inner { flex-wrap: wrap; justify-content: flex-start; gap: 8px 10px; padding: 11px 13px; } .inner p { flex: 1; font-size: 11px; } .link { max-width: calc(100% - 40px); margin-inline-start: 40px; } }
+@media (prefers-reduced-motion: reduce) { .link { transition: none; } }

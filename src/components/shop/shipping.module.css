@@ -1,0 +1,20 @@
+.section { padding-top: 9px; min-width: 0; }
+.section legend { font-size: 16px; font-weight: 800; color: rgb(var(--theme-ink, 20 33 28)); }
+.hint { font-size: 11px; line-height: 2; color: rgb(var(--theme-muted, 105 116 110)); margin: 6px 0 17px; }
+.choices { display: grid; gap: 10px; }
+.choice { display: flex; align-items: center; gap: 13px; padding: 17px; border: 1px solid rgb(var(--theme-brand-soft, 227 233 226)); border-radius: 22px; background: rgb(var(--theme-surface-soft, 248 250 246)); cursor: pointer; transition: border-color .2s, background-color .2s; }
+.choice:hover { border-color: rgb(var(--theme-muted, 131 157 137)); }
+.selected { border-color: rgb(var(--theme-brand, 18 102 74)); background: rgb(var(--theme-brand-soft, 238 245 233)); box-shadow: 0 0 0 1px rgb(var(--theme-brand, 18 102 74)); }
+.choice input { width: 18px; height: 18px; flex-shrink: 0; accent-color: rgb(var(--theme-brand, 18 102 74)); }
+.choice:focus-within { outline: 3px solid rgb(var(--theme-brand, 18 102 74) / 0.266667); outline-offset: 3px; }
+.copy { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 6px; }
+.copy strong { font-size: 13px; font-weight: 800; color: rgb(var(--theme-ink, 20 33 28)); }
+.copy > span { font-size: 11px; color: rgb(var(--theme-muted, 105 116 110)); line-height: 1.9; white-space: pre-line; }
+.copy > small { font-size: 10px; color: rgb(var(--theme-brand, 18 102 74)); line-height: 1.9; }
+.cost { display: inline-flex; align-items: baseline; gap: 4px; color: rgb(var(--theme-brand, 18 102 74)); font-weight: 800; font-size: 13px; text-align: left; flex-shrink: 0; }
+.cost small { font-size: 9px; font-weight: 400; }
+.state { padding: 20px; border: 1px dashed rgb(var(--theme-line, 203 217 203)); border-radius: 22px; background: rgb(var(--theme-surface-soft, 248 250 246)); color: rgb(var(--theme-muted, 105 116 110)); font-size: 12px; line-height: 2; }
+.state button, .state a { display: inline-flex; color: rgb(var(--theme-brand, 18 102 74)); font-weight: 700; margin-top: 9px; margin-inline-end: 17px; text-decoration: underline; text-underline-offset: 4px; }
+.section:disabled .choice { cursor: wait; opacity: .65; }
+@media (max-width: 600px) { .choice { padding: 15px 13px; gap: 10px; flex-wrap: wrap; } .copy { flex-basis: calc(100% - 30px); } .cost { margin-inline-start: 28px; text-align: right; } }
+@media (prefers-reduced-motion: reduce) { .choice { transition: none; } }

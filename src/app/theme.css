@@ -1,0 +1,27 @@
+/* RGB channels let Tailwind opacity utilities and component translucency share a palette.
+   Forest uses each component's original fallback so its appearance stays unchanged. */
+html[data-color-theme='honey'] {
+  --theme-ink: 41 35 29;
+  --theme-muted: 110 101 92;
+  --theme-page: 250 247 241;
+  --theme-line: 226 215 199;
+  --theme-brand: 138 92 32;
+  --theme-brand-strong: 108 69 27;
+  --theme-brand-soft: 247 237 217;
+  --theme-accent: 216 166 75;
+  --theme-accent-hover: 232 189 111;
+  --theme-hero: 241 229 209;
+  --theme-on-soft: 103 76 45;
+  --theme-surface-soft: 248 243 233;
+  --theme-alternate-surface: 237 228 215;
+  --theme-dark: 52 37 27;
+  --theme-dark-elevated: 67 47 32;
+  --theme-on-dark: 237 220 194;
+  --theme-label-on-dark: 196 174 142;
+  --theme-backdrop-start: 255 249 236;
+  --theme-backdrop-mid: 240 223 192;
+  --theme-backdrop-end: 222 194 151;
+  --theme-card-start: 100 65 34;
+  --theme-card-mid: 69 45 29;
+  --theme-card-end: 123 87 44;
+}

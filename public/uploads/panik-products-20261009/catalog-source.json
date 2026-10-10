@@ -1,0 +1,63 @@
+{
+  "importedOn": "2026-10-09",
+  "priceCurrency": "تومان",
+  "priceAndZeroStockConfirmedByOwner": true,
+  "sourceChannel": "https://eitaa.com/kafsh_panik",
+  "products": [
+    {
+      "slug": "panik-498",
+      "code": "498",
+      "source": "https://eitaa.com/kafsh_panik/94893",
+      "price": 1900000,
+      "stock": 0,
+      "categorySlug": "formal",
+      "cover": "/uploads/panik-products-20261009/498-cover-v2.png",
+      "originalPhotoCount": 4
+    },
+    {
+      "slug": "panik-620",
+      "code": "620",
+      "source": "https://eitaa.com/kafsh_panik/94916",
+      "price": 3500000,
+      "stock": 0,
+      "categorySlug": "formal",
+      "cover": "/uploads/panik-products-20261009/620-cover.webp",
+      "originalPhotoCount": 4
+    },
+    {
+      "slug": "panik-622",
+      "code": "622",
+      "source": "https://eitaa.com/kafsh_panik/94921",
+      "price": 3200000,
+      "stock": 0,
+      "categorySlug": "sneaker",
+      "cover": "/uploads/panik-products-20261009/622-cover.webp",
+      "originalPhotoCount": 3
+    }
+  ],
+  "finalAssetPreparation": {
+    "pumpsAndLoafers": "Original photo RGB retained; source-coordinate alpha clipping, neutral ivory canvas and soft background shadow, web export. No generative shoe pixels published.",
+    "sneaker": "Original photograph square crop (left 0, top 315, width 919, height 919); standard web resize/export. Shoes, feet, real shadows and clothing retained.",
+    "gallery": "All 11 original JPEG files retained byte-for-byte.",
+    "noNewProductParts": true,
+    "opaqueSourcePixelChecks": {
+      "model498": {
+        "count": 196144,
+        "changedRgbPixels": 0
+      },
+      "model620": {
+        "count": 188341,
+        "changedRgbPixels": 0
+      }
+    }
+  },
+  "imagegenTrials": {
+    "mode": "built-in image_gen",
+    "published": false,
+    "reason": "Trials slightly reconstructed product details, so rejected to satisfy the owner’s requirement that the actual shoes remain unchanged.",
+    "prompts": [
+      "Use case: background-extraction.\nEdit target: the attached REAL product photograph of the pair of black PANIK pointed-toe buckle pumps (code498) on a carpet.\nPrimary request: accurately remove only the carpet, magazine and chair, leaving the EXACT SAME pair of shoes as a clean transparent-background cutout for an ecommerce product listing.\nCritical invariants: preserve both shoes exactly as photographed: same existing view, perspective, relative positions, silhouette, pointed toes, heel height/shape, proportions, narrow straps, actual square metallic buckles, stitched V panels, seams, black patent finish, existing reflections and imperfections, original insole print. Do NOT generate a replacement pair, redesign, smooth details, change materials, recolor or make the shoes more luxurious. No new shoe parts, no inferred unseen surfaces.\nKeep the full two shoes; original pose and shoe-to-shoe spacing. Crop only the empty outer room area, leaving comfortable transparent padding. No shadow, pedestal, other objects, text or watermark added. Use a genuinely transparent alpha background. This is faithful product extraction, not a styled reinterpretation; truth to the real sale item is the highest priority.",
+      "Use case: background-extraction.\nEdit target: the attached REAL product photograph of the black PANIK penny loafer pair (code620) on a sofa, shot from above.\nPrimary request: remove ONLY the sofa, shoebox, slippers and other background. Extract the EXACT SAME two shoes as a clean product cutout on genuine transparent alpha.\nCritical invariants: retain the original camera view, two-shoe arrangement, relative spacing, every original shoe contour, rounded-square toe, raised moc seam, actual layered penny vamp straps, small silver-colored detail/reflection in the strap as it actually appears, thick black outsole, block heel proportions, original PANIK orange insole printing, exact black patent materials and real reflections/imperfections. Do NOT redraw the shoes, change the strap, add gold hardware/chain/buckle, simplify stitching, remove markings, enhance gloss, alter silhouette or generate a new shoe.\nKeep both complete shoes, no cropping. Center the original pair on a SQUARE 1:1 transparent canvas with generous 15 percent empty padding on all sides for product-card cover safety. Preserve the existing perspective; only the canvas/background may change. No shadows, floor, pedestal, artificial styling, text or watermark. Truthful extraction of the physical product, not a reinterpretation."
+    ]
+  }
+}

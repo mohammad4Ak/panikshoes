@@ -1,0 +1,10 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+*.log
+.next/
+.opencode/
+test.json
+.local-backups/
