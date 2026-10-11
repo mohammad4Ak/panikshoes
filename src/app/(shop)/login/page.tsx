@@ -66,7 +66,7 @@ export default function LoginPage() {
 
   return (
     <AuthShell>
-      <h1>خوش برگشتی.</h1>
+      <h1>خوش آمدی.</h1>
       <p className={styles.authIntro}>وارد حسابت شو و خریدت رو از همون‌جا ادامه بده.</p>
       {error && <div role="alert" className={styles.alert}>{error}</div>}
       <form onSubmit={handleSubmit} className={styles.authForm}>
