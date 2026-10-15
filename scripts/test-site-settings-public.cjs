@@ -71,7 +71,7 @@ function load(file, settings = baseSettings) {
     const source = readFileSync(absolute, 'utf8')
     const code = transformSync(source, { loader: absolute.endsWith('.tsx') ? 'tsx' : 'ts',
       format: 'cjs', target: 'es2022', jsx: 'automatic' }).code
-    vm.runInNewContext(code, { module: testModule, require: requireModule, URLSearchParams }, { filename: absolute })
+    vm.runInNewContext(code, { module: testModule, require: requireModule, URLSearchParams, URL }, { filename: absolute })
     modules.set(absolute, testModule.exports)
     return testModule.exports
   }
@@ -152,6 +152,91 @@ test('Blank contact settings hide telephone, email, fake address, support hours 
   const html = await renderServer('src/app/(shop)/contact/page.tsx')
   assert.doesNotMatch(html, /tel:|mailto:|02112345678|shoeland\.ir|خیابان ولیعصر|ساعات پاسخ‌گویی|نوشتن ایمیل/)
   assert.match(html, /راه‌های ارتباط با فروشگاه به‌زودی/)
+})
+
+test('Footer renders configured copy and ordered links, with an icon and accessible name for each social destination', () => {
+  const html = render('src/components/layout/Footer.tsx', {
+    footerDescription: 'معرفی <پانیک>\nتولیدی کفش زنانه', footerCopyright: 'حقوق سفارشی <فروشگاه>',
+    footerLinks: [{ id: 'size', label: 'راهنمای سایز', href: '/products?q=size' }, { id: 'external', label: 'صفحهٔ برند', href: 'https://example.test/panik' }],
+    instagramUrl: 'https://instagram.com/example', telegramUrl: 'https://t.me/example',
+    eitaaUrl: 'https://eitaa.com/example', whatsappUrl: 'https://wa.me/989123456789',
+  })
+  assert.match(html, /معرفی &lt;پانیک&gt;\nتولیدی کفش زنانه/)
+  assert.match(html, /حقوق سفارشی &lt;فروشگاه&gt;/)
+  assert.doesNotMatch(html, /شعار فروشگاه آزمایشی|KEEP MOVING|MADE FOR/)
+  assert.ok(html.indexOf('راهنمای سایز') < html.indexOf('صفحهٔ برند'))
+  assert.match(html, /href="https:\/\/example.test\/panik" target="_blank" rel="noopener noreferrer"/)
+  for (const name of ['اینستاگرام', 'تلگرام', 'ایتا', 'واتساپ']) {
+    assert.match(html, new RegExp(`aria-label="${name} نام فروشگاه آزمایشی"><svg`))
+  }
+})
+
+test('Footer badges show only enabled managed images, retain verification links and allow unlinked service logos', () => {
+  const html = render('src/components/layout/Footer.tsx', {
+    footerBadges: [
+      { id: 'enamad', title: 'اینماد', imageUrl: 'https://trustseal.enamad.ir/logo.aspx?id=123&Code=abc', href: 'https://trustseal.enamad.ir/?id=123&Code=abc', enabled: true },
+      { id: 'service', title: 'نشان پرداخت', imageUrl: '/uploads/service.png', href: null, enabled: true },
+      { id: 'hidden', title: 'پیش‌نویس خصوصی', imageUrl: '/uploads/hidden.png', href: 'https://example.test/private', enabled: false },
+    ],
+  })
+  assert.match(html, /aria-label="نشان‌ها و خدمات فروشگاه"/)
+  assert.match(html, /href="https:\/\/trustseal.enamad.ir\/\?id=123&amp;Code=abc" target="_blank" rel="noopener noreferrer"/)
+  assert.match(html, /src="https:\/\/trustseal.enamad.ir\/logo.aspx\?id=123&amp;Code=abc"/)
+  assert.match(html, /referrerPolicy="origin"/)
+  assert.match(html, /src="\/uploads\/service.png"/)
+  assert.doesNotMatch(html, /پیش‌نویس خصوصی|hidden.png|example.test\/private/)
+  assert.equal((html.match(/aria-label="مشاهدهٔ /g) ?? []).length, 1)
+  assert.doesNotMatch(render('src/components/layout/Footer.tsx', { footerBadges: [] }), /نشان‌ها و خدمات فروشگاه/)
+})
+
+test('Footer social labels are optional and custom destinations have an uploaded icon with accessible fallback names', () => {
+  const html = render('src/components/layout/Footer.tsx', {
+    footerSocialLinks: [
+      { id: 'instagram', label: '', href: 'https://instagram.com/panik', icon: 'instagram', iconUrl: null, enabled: true },
+      { id: 'custom', label: 'کانال <ما>', href: 'https://example.test/channel', icon: 'custom', iconUrl: '/uploads/custom-social.png', enabled: true },
+      { id: 'empty-custom', label: ' ', href: 'https://social.example.test/channel', icon: 'custom', iconUrl: '/uploads/other.png', enabled: true },
+      { id: 'disabled', label: 'پیش‌نویس', href: 'https://example.test/disabled', icon: 'link', iconUrl: null, enabled: false },
+    ],
+  })
+  assert.match(html, /class="socialIconOnly" href="https:\/\/instagram.com\/panik"/)
+  assert.match(html, /aria-label="اینستاگرام نام فروشگاه آزمایشی" title="اینستاگرام"/)
+  assert.doesNotMatch(html, /<span>اینستاگرام<\/span>/)
+  assert.match(html, /<span>کانال &lt;ما&gt;<\/span>/)
+  assert.match(html, /src="\/uploads\/custom-social.png"/)
+  assert.match(html, /aria-label="social.example.test نام فروشگاه آزمایشی"/)
+  assert.doesNotMatch(html, /پیش‌نویس|example.test\/disabled/)
+})
+
+test('An explicitly cleared dynamic social list does not resurrect old fixed social links', () => {
+  const html = render('src/components/layout/Footer.tsx', { footerSocialLinks: [], instagramUrl: 'https://instagram.com/old', telegramUrl: 'https://t.me/old' })
+  assert.doesNotMatch(html, /شبکه‌های اجتماعی فروشگاه|instagram.com\/old|t.me\/old/)
+})
+
+test('Contact page uses the same enabled custom social list and does not revive legacy destinations', async () => {
+  const html = await renderServer('src/app/(shop)/contact/page.tsx', {
+    instagramUrl: 'https://instagram.com/old', telegramUrl: 'https://t.me/old',
+    footerSocialLinks: [
+      { id: 'custom', label: 'کانال پانیک', href: 'https://example.test/panik', icon: 'custom', iconUrl: '/uploads/social.png', enabled: true },
+      { id: 'disabled', label: 'غیرفعال', href: 'https://example.test/disabled', icon: 'telegram', iconUrl: null, enabled: false },
+    ],
+  })
+  assert.match(html, /href="https:\/\/example.test\/panik"/)
+  assert.match(html, /src="\/uploads\/social.png"/)
+  assert.match(html, /کانال پانیک/)
+  assert.doesNotMatch(html, /instagram.com\/old|t.me\/old|example.test\/disabled/)
+  const cleared = await renderServer('src/app/(shop)/contact/page.tsx', { footerSocialLinks: [], instagramUrl: 'https://instagram.com/old' })
+  assert.doesNotMatch(cleared, /instagram.com\/old/)
+  assert.match(cleared, /راه‌های ارتباط با فروشگاه به‌زودی/)
+})
+
+test('Footer can omit every configurable collection and contact without leaving empty navigation or social links', () => {
+  const html = render('src/components/layout/Footer.tsx', {
+    footerLinks: [], footerBadges: [], footerDescription: '', tagline: '',
+    instagramUrl: null, telegramUrl: null, eitaaUrl: null, whatsappUrl: null,
+  })
+  assert.doesNotMatch(html, /<nav|شبکه‌های اجتماعی فروشگاه|نشان‌ها و خدمات فروشگاه|tel:|mailto:/)
+  assert.match(html, /نام فروشگاه آزمایشی · تمامی حقوق محفوظ است./)
+  assert.match(html, /ارتباط با فروشگاه/)
 })
 
 test('Configured contact details produce working links and preserve multiline address and hours', async () => {

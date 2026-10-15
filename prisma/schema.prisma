@@ -219,6 +219,11 @@ model SiteSettings {
   tagline               String
   logoUrl               String?
   logoLightUrl          String?
+  footerDescription     String   @default("")
+  footerCopyright       String   @default("")
+  footerLinks           Json     @default("[{\"id\":\"products\",\"label\":\"همهٔ محصولات\",\"href\":\"/products\"},{\"id\":\"about\",\"label\":\"دربارهٔ ما\",\"href\":\"/about\"},{\"id\":\"contact\",\"label\":\"تماس با ما\",\"href\":\"/contact\"},{\"id\":\"tracking\",\"label\":\"پیگیری سفارش\",\"href\":\"/profile\"},{\"id\":\"account\",\"label\":\"حساب کاربری\",\"href\":\"/profile\"},{\"id\":\"cart\",\"label\":\"سبد خرید\",\"href\":\"/cart\"}]")
+  footerBadges          Json     @default("[]")
+  footerSocialLinks     Json     @default("[]")
   announcementEnabled   Boolean  @default(false)
   announcementText      String   @default("")
   announcementLink      String?
@@ -239,6 +244,8 @@ model SiteSettings {
   supportHours          String   @default("")
   instagramUrl          String?
   telegramUrl           String?
+  eitaaUrl              String?
+  whatsappUrl           String?
   seoTitle              String
   seoDescription        String
   createdAt             DateTime @default(now())

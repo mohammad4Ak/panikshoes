@@ -4,6 +4,7 @@ export const settingsSections = [
   { id: 'homepage', label: 'صفحهٔ اول', description: 'محصولات چرخشی، زمان تعویض و بنر' },
   { id: 'announcement', label: 'اطلاعیه', description: 'پیام عمومی بالای سایت' },
   { id: 'contact', label: 'اطلاعات تماس', description: 'تلفن، نشانی و راه‌های ارتباطی' },
+  { id: 'footer', label: 'فوتر و شبکه‌های اجتماعی', description: 'معرفی، لینک‌ها، شبکه‌های اجتماعی و نشان‌های اعتماد و پرداخت' },
   { id: 'seo', label: 'عنوان و توضیحات سایت', description: 'عنوان و معرفی سایت در جست‌وجو' },
 ] as const
 

@@ -7,7 +7,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowUpLeft, Check, ImagePlus, LoaderCircle, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import PanikMark from '@/components/ui/PanikMark'
 import HomeHeroSettings from '@/components/admin/HomeHeroSettings'
-import { initialSiteSettings, isSiteSettings, isHomeHeroProductIds, isHomeHeroIntervalSeconds, type SiteSettings, type SiteSettingsValues } from '@/lib/site-settings-contract'
+import FooterSettings from '@/components/admin/FooterSettings'
+import { initialSiteSettings, isSiteSettings, isHomeHeroProductIds, isHomeHeroIntervalSeconds, isFooterLinks, isFooterBadges, isFooterHref, isFooterBadgeImageUrl, isFooterSocialLinks, isFooterSocialHref, isFooterSocialIconUrl, type SiteSettings, type SiteSettingsValues } from '@/lib/site-settings-contract'
 import { settingsSections, getSettingsSection, type SettingsSectionId } from '@/lib/admin-settings-sections'
 import adminStyles from '@/components/admin/admin.module.css'
 import styles from './settings.module.css'
@@ -27,7 +28,15 @@ async function responseError(response: Response, fallback: string) {
 }
 
 const validSettings = isSiteSettings
-const settingsValueEqual = (left: SiteSettings[keyof SiteSettings] | undefined, right: SiteSettings[keyof SiteSettings] | undefined) => Array.isArray(left) && Array.isArray(right) ? left.length === right.length && left.every((value, index) => value === right[index]) : left === right
+function settingsValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((item, index) => settingsValueEqual(item, right[index]))
+  if (left && right && typeof left === 'object' && typeof right === 'object' && !Array.isArray(left) && !Array.isArray(right)) {
+    const first = left as Record<string, unknown>, second = right as Record<string, unknown>
+    return Object.keys(first).length === Object.keys(second).length && Object.keys(first).every((key) => Object.hasOwn(second, key) && settingsValueEqual(first[key], second[key]))
+  }
+  return false
+}
 
 export default function AdminSettingsPage() {
   const router = useRouter()
@@ -37,7 +46,7 @@ export default function AdminSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState<ImageField | null>(null)
+  const [uploading, setUploading] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [conflict, setConflict] = useState(false)
@@ -46,6 +55,13 @@ export default function AdminSettingsPage() {
   const mountedRef = useRef(true)
   const busy = loading || saving || uploading !== null
   const dirty = !!baselineRef.current && Object.keys(initialSiteSettings).some((key) => key !== 'version' && !settingsValueEqual(form[key as keyof SiteSettings], baselineRef.current?.[key as keyof SiteSettings]))
+
+  useEffect(() => {
+    if (!dirty && !saving && !uploading) return
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [dirty, saving, uploading])
 
   const selectedSection = settingsSections.find((section) => section.id === activeSection) ?? settingsSections[0]
   useEffect(() => {
@@ -143,6 +159,22 @@ export default function AdminSettingsPage() {
     if (!isHomeHeroProductIds(form.homeHeroProductIds)) return validationError('حداکثر ۱۰ محصول متفاوت برای بخش اصلی انتخاب کن.', 'homepage', 'settings-homeHeroProductIds')
     if (form.homeBannerEnabled && !form.homeBannerTitle.trim()) return validationError('برای نمایش بنر صفحهٔ اول، عنوان آن را وارد کنید.', 'homepage', 'settings-homeBannerTitle')
     if (form.homeBannerLink && !form.homeBannerLinkLabel.trim()) return validationError('برای لینک بنر صفحهٔ اول، عنوان دکمه را وارد کنید.', 'homepage', 'settings-homeBannerLinkLabel')
+    for (const link of form.footerLinks) {
+      if (!link.label.trim()) return validationError('عنوان لینک فوتر را وارد کنید.', 'footer', `settings-footer-link-label-${link.id}`)
+      if (!isFooterHref(link.href)) return validationError('برای لینک فوتر، مسیر داخلی سایت یا آدرس معتبر HTTPS وارد کنید.', 'footer', `settings-footer-link-href-${link.id}`)
+    }
+    if (!isFooterLinks(form.footerLinks)) return validationError('حداکثر ۱۰ لینک با عنوان معتبر برای فوتر تعریف کنید.', 'footer', 'settings-footerLinks')
+    for (const badge of form.footerBadges) {
+      if (!badge.title.trim()) return validationError('نام نشان را وارد کنید.', 'footer', `settings-footer-badge-title-${badge.id}`)
+      if (!isFooterBadgeImageUrl(badge.imageUrl)) return validationError('تصویر نشان را بارگذاری کنید یا آدرس رسمی تصویر اینماد را وارد کنید.', 'footer', `settings-footer-badge-image-${badge.id}`)
+      if (badge.href && !isFooterHref(badge.href)) return validationError('آدرس معتبر لینک تأیید یا اطلاعات نشان را وارد کنید.', 'footer', `settings-footer-badge-href-${badge.id}`)
+    }
+    if (!isFooterBadges(form.footerBadges)) return validationError('حداکثر ۸ نشان با نام و تصویر معتبر تعریف کنید.', 'footer', 'settings-footerBadges')
+    for (const social of form.footerSocialLinks) {
+      if (!isFooterSocialHref(social.href)) return validationError('برای شبکهٔ اجتماعی آدرس معتبر با https:// وارد کنید.', 'footer', `settings-footer-social-href-${social.id}`)
+      if (social.icon === 'custom' && !isFooterSocialIconUrl(social.iconUrl)) return validationError('برای آیکون دلخواه، یک تصویر بارگذاری کنید.', 'footer', `settings-footer-social-upload-${social.id}`)
+    }
+    if (!isFooterSocialLinks(form.footerSocialLinks)) return validationError('حداکثر ۱۲ شبکه یا لینک با نام و آیکون معتبر تعریف کنید.', 'footer', 'settings-footerSocialLinks')
     // Hidden panels still belong to the shared draft. Check every input before
     // sending it, then reveal the invalid field so the browser can focus it.
     const invalidControl = event.currentTarget?.querySelector<HTMLInputElement | HTMLTextAreaElement>('input:invalid, textarea:invalid')
@@ -180,8 +212,12 @@ export default function AdminSettingsPage() {
     }
   }
 
-  const upload = async (key: ImageField, file?: File) => {
+  const upload = async (key: ImageField | { badgeId: string } | { socialId: string }, file?: File) => {
     if (!file || requestRef.current || !loaded) return
+    if (typeof key !== 'string') {
+      if ('badgeId' in key && !form.footerBadges.some((badge) => badge.id === key.badgeId)) return
+      if ('socialId' in key && !form.footerSocialLinks.some((social) => social.id === key.socialId && social.icon === 'custom')) return
+    }
     setError('')
     setNotice('')
     if (!IMAGE_TYPES.includes(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) return setError('یک تصویر PNG، JPG، WebP یا GIF غیرخالی و حداکثر ۵ مگابایت انتخاب کنید.')
@@ -189,16 +225,17 @@ export default function AdminSettingsPage() {
     requestRef.current = controller
     let timedOut = false
     const timer = setTimeout(() => { timedOut = true; controller.abort() }, REQUEST_TIMEOUT)
-    setUploading(key)
+    setUploading(typeof key === 'string' ? key : 'badgeId' in key ? `badge:${key.badgeId}` : `social:${key.socialId}`)
     try {
       const body = new FormData()
       body.append('file', file)
+      body.append('context', 'branding')
       const response = await fetch('/api/upload', { method: 'POST', signal: controller.signal, body })
       if (!response.ok) throw new Error(await responseError(response, 'تصویر بارگذاری نشد.'))
       const data = await response.json()
       if (typeof data?.url !== 'string' || !data.url) throw new Error('آدرس تصویر از سرور دریافت نشد.')
       if (!mountedRef.current || controller.signal.aborted) return
-      setForm((previous) => ({ ...previous, [key]: data.url }))
+      setForm((previous) => typeof key === 'string' ? { ...previous, [key]: data.url } : 'badgeId' in key ? { ...previous, footerBadges: previous.footerBadges.map((badge) => badge.id === key.badgeId ? { ...badge, imageUrl: data.url } : badge) } : { ...previous, footerSocialLinks: previous.footerSocialLinks.map((social) => social.id === key.socialId && social.icon === 'custom' ? { ...social, iconUrl: data.url } : social) })
       setNotice('تصویر بارگذاری شد؛ برای نمایش در سایت، تنظیمات را ذخیره کنید.')
     } catch (cause) {
       if (mountedRef.current && (!controller.signal.aborted || timedOut)) setError(timedOut ? 'بارگذاری تصویر طول کشید. دوباره تلاش کنید.' : cause instanceof Error ? cause.message : 'تصویر بارگذاری نشد. دوباره تلاش کنید.')
@@ -274,8 +311,9 @@ export default function AdminSettingsPage() {
         {input('homeBannerImageAlt', 'توضیح تصویر برای دسترس‌پذیری', 200, { placeholder: 'مثلاً: کفش طبیعت‌گردی روی یک مسیر سنگی' })}
       </section>
       <section className={styles.panel} {...sectionProps('announcement')}><div className={styles.sectionTitle}><span>۰۴</span><div><h2 id="settings-heading-announcement">اطلاعیهٔ فروشگاه</h2><p>یک پیام کوتاه برای تخفیف، تغییر زمان ارسال یا خبرهای مهم.</p></div></div><label className={styles.toggleRow} htmlFor="settings-announcementEnabled"><span><strong>نمایش اطلاعیه در سایت</strong><small>پس از ذخیره، اطلاعیه در بالای صفحات فروشگاه نمایش داده می‌شود.</small></span><input id="settings-announcementEnabled" type="checkbox" role="switch" checked={form.announcementEnabled} disabled={busy} onChange={(event) => setField('announcementEnabled', event.target.checked)} /></label>{input('announcementText', 'متن اطلاعیه', 500, { multiline: true, required: form.announcementEnabled, placeholder: 'مثلاً: سفارش‌های این هفته با ارسال رایگان...' })}<div className={styles.twoFields}>{input('announcementLinkLabel', 'عنوان لینک (اختیاری)', 80, { placeholder: 'مشاهده محصولات' })}{input('announcementLink', 'آدرس لینک (اختیاری)', 2048, { direction: 'ltr', placeholder: '/products یا https://...' })}</div>{form.announcementEnabled && form.announcementText && <div className={styles.announcementPreview}><small>پیش‌نمایش اطلاعیه</small><p>{form.announcementText}</p>{form.announcementLink && form.announcementLinkLabel && <span>{form.announcementLinkLabel} ↗</span>}</div>}</section>
-      <section className={styles.panel} {...sectionProps('contact')}><div className={styles.sectionTitle}><span>۰۵</span><div><h2 id="settings-heading-contact">ارتباط و پشتیبانی</h2><p>اطلاعات نمایش داده‌شده در صفحهٔ تماس و فوتر سایت.</p></div></div><div className={styles.twoFields}>{input('phone', 'شماره تماس', 40, { direction: 'ltr', type: 'tel' })}{input('email', 'ایمیل', 254, { direction: 'ltr', type: 'email' })}{input('address', 'نشانی فروشگاه', 500, { multiline: true })}{input('supportHours', 'ساعت پاسخگویی', 500, { multiline: true })}{input('instagramUrl', 'لینک اینستاگرام (اختیاری)', 2048, { direction: 'ltr', placeholder: 'https://www.instagram.com/...' })}{input('telegramUrl', 'لینک تلگرام (اختیاری)', 2048, { direction: 'ltr', placeholder: 'https://t.me/...' })}</div></section>
-      <section className={styles.panel} {...sectionProps('seo')}><div className={styles.sectionTitle}><span>۰۶</span><div><h2 id="settings-heading-seo">نمایش در موتورهای جستجو</h2><p>عنوان و توضیح پیش‌فرض سایت برای مرورگر و موتورهای جست‌وجو.</p></div></div>{input('seoTitle', 'عنوان سایت', 120, { required: true })}{input('seoDescription', 'توضیح کوتاه سایت', 300, { multiline: true, required: true })}</section>
+      <section className={styles.panel} {...sectionProps('contact')}><div className={styles.sectionTitle}><span>۰۵</span><div><h2 id="settings-heading-contact">ارتباط و پشتیبانی</h2><p>اطلاعات نمایش داده‌شده در صفحهٔ تماس و فوتر سایت.</p></div></div><div className={styles.twoFields}>{input('phone', 'شماره تماس', 40, { direction: 'ltr', type: 'tel' })}{input('email', 'ایمیل', 254, { direction: 'ltr', type: 'email' })}{input('address', 'نشانی فروشگاه', 500, { multiline: true })}{input('supportHours', 'ساعت پاسخگویی', 500, { multiline: true })}</div></section>
+      <section className={styles.panel} {...sectionProps('footer')}><div className={styles.sectionTitle}><span>۰۶</span><div><h2 id="settings-heading-footer">فوتر و شبکه‌های اجتماعی</h2><p>چیدمان لینک‌ها، معرفی فروشگاه و نشان‌های پایین سایت را شخصی‌سازی کنید.</p></div></div><FooterSettings values={form} onChange={setField} onBadgeUpload={(id, file) => void upload({ badgeId: id }, file)} uploadingBadgeId={uploading?.startsWith('badge:') ? uploading.slice(6) : null} onSocialUpload={(id, file) => void upload({ socialId: id }, file)} uploadingSocialId={uploading?.startsWith('social:') ? uploading.slice(7) : null} disabled={busy || !loaded} /></section>
+      <section className={styles.panel} {...sectionProps('seo')}><div className={styles.sectionTitle}><span>۰۷</span><div><h2 id="settings-heading-seo">نمایش در موتورهای جستجو</h2><p>عنوان و توضیح پیش‌فرض سایت برای مرورگر و موتورهای جست‌وجو.</p></div></div>{input('seoTitle', 'عنوان سایت', 120, { required: true })}{input('seoDescription', 'توضیح کوتاه سایت', 300, { multiline: true, required: true })}</section>
       <div className={styles.savePanel}>{uploading && <p role="status" className={styles.uploadStatus}><LoaderCircle size={15} className={styles.spinner} aria-hidden="true" />در حال بارگذاری تصویر؛ می‌توانید بخش‌های دیگر تنظیمات را ببینید.</p>}{error && <p role="alert" className={styles.error}>{error}</p>}{notice && <p role="status" className={styles.notice}><Check size={17} aria-hidden="true" />{notice}</p>}<div className={styles.saveActions}><div><strong>{dirty ? 'تغییرات ذخیره‌نشده دارید' : 'تنظیمات فروشگاه'}</strong><p>تغییرات همهٔ بخش‌ها با همین دکمه ذخیره می‌شوند؛ جابه‌جایی بین زیرمنوها آن‌ها را پاک نمی‌کند.</p></div><div className={styles.buttons}><button type="button" className={`btn-outline ${styles.reload}`} disabled={busy} onClick={() => void load()}><RefreshCw size={17} aria-hidden="true" />{loading ? 'در حال دریافت...' : 'دریافت آخرین نسخه'}</button><button type="submit" className={`btn-primary ${styles.save}`} disabled={busy || conflict || !dirty}>{saving ? <LoaderCircle size={17} className={styles.spinner} aria-hidden="true" /> : <Save size={17} aria-hidden="true" />}{saving ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}</button></div></div></div>
     </form>}
   </div>

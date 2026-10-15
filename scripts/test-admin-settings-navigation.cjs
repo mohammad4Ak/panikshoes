@@ -101,8 +101,8 @@ const submenu = (app) => nodes(app.tree).find((node) => node.props.id === 'admin
 const links = (tree) => nodes(tree).filter((node) => node.type === 'a' || node.type === 'Link')
 
 test('Settings sections have stable unique IDs and unknown hashes use branding', () => {
-  assert.equal(settingsSections.length, 6)
-  assert.equal(new Set(settingsSections.map(({ id }) => id)).size, 6)
+  assert.equal(settingsSections.length, 7)
+  assert.equal(new Set(settingsSections.map(({ id }) => id)).size, 7)
   for (const { id, label } of settingsSections) { assert.ok(label); assert.equal(isSettingsSection(id), true); assert.equal(getSettingsSection('#' + id), id) }
   for (const hash of ['', '#missing', '#__proto__', '#appearance?draft=1']) assert.equal(getSettingsSection(hash), 'branding')
 })
@@ -143,7 +143,7 @@ test('Hash changes and browser history keep desktop and compact mobile sections 
   app.changeHash('#seo', 'popstate')
   assert.ok(current().every((node) => node.props.href === '#seo'))
   const mobile = nodes(app.tree).find((node) => node.type === 'nav' && node.props['aria-label'] === 'بخش‌های تنظیمات عمومی')
-  assert.equal(links(mobile).length, 6)
+  assert.equal(links(mobile).length, 7)
   app.navigate('/admin/products')
   assert.ok(!nodes(app.tree).some((node) => node.props['aria-label'] === 'بخش‌های تنظیمات عمومی'))
   app.unmount()

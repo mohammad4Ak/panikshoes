@@ -5,6 +5,7 @@ const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
 const { File } = require('node:buffer')
+const { webcrypto } = require('node:crypto')
 
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data })
 const settle = () => new Promise(setImmediate)
@@ -13,7 +14,7 @@ const deferred = () => {
   const promise = new Promise((done) => { resolve = done })
   return { promise, resolve }
 }
-const contract = { module: { exports: {} } }
+const contract = { module: { exports: {} }, URL }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/site-settings-contract.ts'), 'utf8'), { loader: 'ts', format: 'cjs' }).code, contract)
 const canonical = { ...contract.module.exports.initialSiteSettings, version: 2 }
 const sectionContract = { module: { exports: {} } }
@@ -68,6 +69,11 @@ function page(queues = {}, options = {}) {
     'lucide-react': new Proxy({}, { get: (_, key) => key }),
     '@/components/ui/PanikMark': { __esModule: true, default: 'PanikMark' },
     '@/components/admin/HomeHeroSettings': { __esModule: true, default: 'HomeHeroSettings' },
+    '@/components/admin/FooterSettings': { __esModule: true, default: 'FooterSettings' },
+    '@/components/ui/EnhancedSelect': { __esModule: true, default: 'EnhancedSelect' },
+    '@/components/ui/SocialIcons': { EitaaIcon: 'EitaaIcon', InstagramIcon: 'InstagramIcon', TelegramIcon: 'TelegramIcon', WhatsAppIcon: 'WhatsAppIcon' },
+    './enhanced-select.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
+    './footer-settings.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
     '@/lib/site-settings-contract': contract.module.exports,
     '@/lib/admin-settings-sections': sectionContract.module.exports,
     '@/components/admin/admin.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
@@ -108,20 +114,33 @@ function page(queues = {}, options = {}) {
     querySelector(selector) { return selector.includes(':invalid') ? element(invalidNode()) : null },
   }
   const context = {
-    module: { exports: {} }, AbortController, FormData, fetch, window, document, queueMicrotask,
+    module: { exports: {} }, AbortController, FormData, fetch, window, document, queueMicrotask, crypto: options.crypto ?? webcrypto,
     requestAnimationFrame(callback) { queueMicrotask(callback); return 0 },
     cancelAnimationFrame() {},
     setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id },
     clearTimeout(id) { timers.delete(id) },
     require(name) { assert.ok(name in dependencies, `Unexpected dependency ${name}`); return dependencies[name] },
   }
+  const selectContext = { ...context, module: { exports: {} } }
+  vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/components/ui/EnhancedSelect.tsx'), 'utf8'), { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, selectContext)
+  dependencies['@/components/ui/EnhancedSelect'].default = selectContext.module.exports.default
+  const footerContext = { ...context, module: { exports: {} } }
+  vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/components/admin/FooterSettings.tsx'), 'utf8'), { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, footerContext)
+  dependencies['@/components/admin/FooterSettings'].default = footerContext.module.exports.default
+  function expand(node) {
+    if (Array.isArray(node)) return node.map(expand)
+    if (!node || typeof node !== 'object' || !node.props) return node
+    if (typeof node.type === 'function') return expand(node.type(node.props))
+    return { ...node, props: { ...node.props, children: expand(node.props.children) } }
+  }
   vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/app/admin/settings/page.tsx'), 'utf8'), { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, context)
   const app = {
     requests, get tree() { return tree }, get writes() { return writes }, get refreshes() { return refreshes },
     get currentHash() { return currentHash }, get focus() { return focus },
+    get listeners() { return listeners },
     setHash(hash, type = 'hashchange') { currentHash = hash; dispatch(type); return app.render() },
     submit() { return nodes(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {}, currentTarget: { querySelector() { return element(invalidNode()) } } }) },
-    render() { cursor = 0; tree = context.module.exports.default(); effects.splice(0).forEach((effect) => effect()); return tree },
+    render() { cursor = 0; tree = expand(context.module.exports.default()); effects.splice(0).forEach((effect) => effect()); return tree },
     timeout() { for (const callback of [...timers.values()]) callback() },
     unmount() { for (const slot of slots) slot?.cleanup?.() },
   }
@@ -431,10 +450,10 @@ test('Saved honey palette can be restored to forest and palette edits are locked
 
 
 test('Settings sections open from direct hashes and follow hashchange/back-forward without refetching or retaining listeners after unmount', async () => {
-  for (const id of ['branding', 'appearance', 'homepage', 'announcement', 'contact', 'seo']) {
+  for (const id of ['branding', 'appearance', 'homepage', 'announcement', 'contact', 'footer', 'seo']) {
     const app = page({}, { hash: '#' + id })
     await settle(); app.render()
-    assert.equal(sections(app).length, 6)
+    assert.equal(sections(app).length, 7)
     assert.deepEqual(visibleSections(app), [id])
     assert.equal(sections(app).find((node) => node.props['data-settings-section'] === id).props.id, 'settings-panel-' + id)
     app.unmount()
@@ -642,5 +661,236 @@ test('Hero controls follow the whole-form busy lock during saves and retain thei
   assert.equal(heroSettings(app).props.disabled, false)
   assert.deepEqual(Array.from(heroSettings(app).props.productIds), ['shoe-1'])
   assert.equal(app.refreshes, 0)
+  app.unmount()
+})
+
+const footerField = (app, prefix) => nodes(app.tree).find((node) => typeof node.props.id === 'string' && node.props.id.startsWith(prefix))
+const accessibleButton = (app, label) => nodes(app.tree).find((node) => node.type === 'button' && node.props['aria-label'] === label)
+
+test('Equivalent footer object edits stay clean, and restored link edits restore the clean baseline', async () => {
+  const app = page({}, { hash: '#footer' })
+  await settle(); app.render()
+  const label = footerField(app, 'settings-footer-link-label-')
+  const original = label.props.value
+  label.props.onChange({ target: { value: original } }); app.render()
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  footerField(app, 'settings-footer-link-label-').props.onChange({ target: { value: 'عنوان تازه' } }); app.render()
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, false)
+  footerField(app, 'settings-footer-link-label-').props.onChange({ target: { value: original } }); app.render()
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  assert.equal(app.listeners.get('beforeunload')?.size || 0, 0)
+  app.unmount()
+})
+
+test('Footer link order, social links and copy publish through the shared versioned save', async () => {
+  const app = page({}, { hash: '#footer' })
+  await settle(); app.render()
+  field(app, 'footerDescription').props.onChange({ target: { value: 'تولیدی کفش زنانه پانیک' } }); app.render()
+  field(app, 'footerCopyright').props.onChange({ target: { value: 'حقوق سایت برای پانیک محفوظ است.' } }); app.render()
+  button(app, 'افزودن شبکه یا لینک').props.onClick(); app.render()
+  footerField(app, 'settings-footer-social-href-').props.onChange({ target: { value: 'https://eitaa.com/kafsh_panik' } }); app.render()
+  footerField(app, 'settings-footer-social-icon-').props.onChange({ target: { value: 'eitaa' } }); app.render()
+  accessibleButton(app, 'انتقال لینک 1 به پایین').props.onClick(); app.render()
+  app.setHash('#contact')
+  await submit(app); app.render()
+  const payload = JSON.parse(patches(app)[0].body)
+  assert.equal(payload.version, canonical.version)
+  assert.equal(payload.footerLinks[0].id, canonical.footerLinks[1].id)
+  assert.equal(payload.footerLinks[1].id, canonical.footerLinks[0].id)
+  assert.equal(payload.footerDescription, 'تولیدی کفش زنانه پانیک')
+  assert.equal(payload.footerSocialLinks[0].href, 'https://eitaa.com/kafsh_panik')
+  assert.equal(payload.footerSocialLinks[0].icon, 'eitaa')
+  assert.equal(payload.footerSocialLinks[0].label, '')
+  assert.equal(payload.eitaaUrl, canonical.eitaaUrl)
+  assert.equal(app.refreshes, 1)
+  app.unmount()
+})
+
+test('Badge upload shares the request lock, follows section changes and only publishes after Save', async () => {
+  const pending = deferred()
+  const app = page({ 'POST /api/upload': [pending.promise] }, { hash: '#footer' })
+  await settle(); app.render()
+  button(app, 'افزودن نشان').props.onClick(); app.render()
+  footerField(app, 'settings-footer-badge-title-').props.onChange({ target: { value: 'نشان رسمی فروشگاه' } }); app.render()
+  footerField(app, 'settings-footer-badge-upload-').props.onChange({ target: { files: [new File([new Uint8Array([1])], 'badge.png', { type: 'image/png' })], value: 'selected' } }); app.render()
+  assert.equal(button(app, 'دریافت آخرین نسخه').props.disabled, true)
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  assert.equal(app.listeners.get('beforeunload').size, 1)
+  app.setHash('#branding')
+  await submit(app)
+  assert.equal(patches(app).length, 0)
+  const upload = app.requests.find((request) => request.url === '/api/upload')
+  assert.equal(upload.body.get('context'), 'branding')
+  pending.resolve(response({ url: '/uploads/official-badge.png' })); await settle(); app.render()
+  assert.equal(patches(app).length, 0)
+  await submit(app); app.render()
+  const badge = JSON.parse(patches(app)[0].body).footerBadges[0]
+  assert.equal(badge.title, 'نشان رسمی فروشگاه')
+  assert.equal(badge.imageUrl, '/uploads/official-badge.png')
+  assert.equal(badge.enabled, true)
+  assert.equal(badge.href, null)
+  app.unmount()
+  assert.equal(app.listeners.get('beforeunload').size, 0)
+})
+
+test('Invalid footer URLs reveal the correct hidden section and focus the precise field', async () => {
+  const app = page({}, { hash: '#footer' })
+  await settle(); app.render()
+  const target = footerField(app, 'settings-footer-link-href-')
+  target.props.onChange({ target: { value: 'javascript:alert(1)' } }); app.render()
+  app.setHash('#contact')
+  await submit(app); app.render()
+  assert.equal(patches(app).length, 0)
+  assert.deepEqual(visibleSections(app), ['footer'])
+  assert.equal(app.focus.at(-1), target.props.id)
+  assert.match(text(app.tree), /آدرس معتبر HTTPS/)
+  app.unmount()
+})
+
+test('Incomplete badge blocks saving with a focused title, and the add control enforces the badge limit', async () => {
+  const app = page({}, { hash: '#footer' })
+  await settle(); app.render()
+  for (let i = 0; i < 8; i++) { button(app, 'افزودن نشان').props.onClick(); app.render() }
+  assert.equal(button(app, 'افزودن نشان').props.disabled, true)
+  const title = footerField(app, 'settings-footer-badge-title-')
+  app.setHash('#branding')
+  await submit(app); app.render()
+  assert.equal(patches(app).length, 0)
+  assert.deepEqual(visibleSections(app), ['footer'])
+  assert.equal(app.focus.at(-1), title.props.id)
+  app.unmount()
+})
+
+test('Conflict reload adopts untouched footer objects and preserves only locally changed footer arrays', async () => {
+  const latest = { ...canonical, version: 3, footerDescription: 'معرفی ادمین دیگر', footerLinks: canonical.footerLinks.map((link, index) => index === 0 ? { ...link, label: 'عنوان ادمین دیگر' } : link), footerBadges: [{ id: 'official', title: 'نشان', imageUrl: '/uploads/official.png', href: null, enabled: true }] }
+  const app = page({ 'GET /api/admin/site-settings': [response(canonical), response(latest)], 'PATCH /api/admin/site-settings': [response({}, 409)] }, { hash: '#footer' })
+  await settle(); app.render()
+  footerField(app, 'settings-footer-link-label-').props.onChange({ target: { value: 'عنوان محلی' } }); app.render()
+  await submit(app); app.render()
+  button(app, 'دریافت آخرین نسخه').props.onClick(); await settle(); app.render()
+  assert.equal(footerField(app, 'settings-footer-link-label-').props.value, 'عنوان محلی')
+  assert.equal(field(app, 'footerDescription').props.value, latest.footerDescription)
+  assert.equal(footerField(app, 'settings-footer-badge-title-').props.value, 'نشان')
+  await submit(app)
+  const payload = JSON.parse(patches(app)[1].body)
+  assert.equal(payload.version, 3)
+  assert.equal(payload.footerLinks[0].label, 'عنوان محلی')
+  assert.equal(payload.footerBadges[0].id, 'official')
+  app.unmount()
+})
+
+test('Footer link creation works over a LAN origin without the secure-context randomUUID API', async () => {
+  const app = page({}, { hash: '#footer', crypto: {} })
+  await settle(); app.render()
+  button(app, 'افزودن لینک').props.onClick(); app.render()
+  const labels = nodes(app.tree).filter((node) => typeof node.props.id === 'string' && node.props.id.startsWith('settings-footer-link-label-'))
+  const hrefs = nodes(app.tree).filter((node) => typeof node.props.id === 'string' && node.props.id.startsWith('settings-footer-link-href-'))
+  assert.match(labels.at(-1).props.id, /^settings-footer-link-label-footer-[a-z0-9]+-[a-z0-9]+$/)
+  labels.at(-1).props.onChange({ target: { value: 'سوالات متداول' } }); app.render()
+  nodes(app.tree).find((node) => node.props.id === hrefs.at(-1).props.id).props.onChange({ target: { value: '/faq' } }); app.render()
+  await submit(app)
+  assert.equal(JSON.parse(patches(app)[0].body).footerLinks.at(-1).href, '/faq')
+  app.unmount()
+})
+
+test('Custom social icons upload through the shared lock and publish with a genuinely optional blank label', async () => {
+  const pending = deferred()
+  const social = { id: 'our-channel', label: '', href: 'https://example.com/our-channel', icon: 'link', iconUrl: null, enabled: true }
+  const initial = { ...canonical, instagramUrl: 'https://instagram.com/legacy', footerSocialLinks: [social] }
+  const saved = { ...initial, version: 3, footerSocialLinks: [{ ...social, icon: 'custom', iconUrl: '/uploads/our-channel.png' }] }
+  const app = page({ 'GET /api/admin/site-settings': [response(initial)], 'POST /api/upload': [pending.promise], 'PATCH /api/admin/site-settings': [response(saved)] }, { hash: '#footer' })
+  await settle(); app.render()
+  const label = footerField(app, 'settings-footer-social-label-')
+  assert.equal(label.props.required, undefined)
+  assert.match(text(app.tree), /نام نمایشی اختیاری است/)
+  footerField(app, 'settings-footer-social-icon-').props.onChange({ target: { value: 'custom' } }); app.render()
+  footerField(app, 'settings-footer-social-upload-').props.onChange({ target: { files: [new File([new Uint8Array([1])], 'channel.png', { type: 'image/png' })], value: 'selected' } }); app.render()
+  assert.equal(footerField(app, 'settings-footer-social-label-').props.disabled, true)
+  assert.equal(footerField(app, 'settings-footer-social-icon-').props.disabled, true)
+  assert.equal(accessibleButton(app, 'حذف شبکهٔ اجتماعی 1').props.disabled, true)
+  app.setHash('#contact')
+  await submit(app)
+  assert.equal(patches(app).length, 0)
+  pending.resolve(response({ url: '/uploads/our-channel.png' })); await settle(); app.render()
+  assert.ok(nodes(app.tree).some((node) => node.type === 'Image' && node.props.src === '/uploads/our-channel.png'))
+  await submit(app); app.render()
+  const payload = JSON.parse(patches(app)[0].body)
+  assert.deepEqual(payload.footerSocialLinks, saved.footerSocialLinks)
+  assert.equal(payload.instagramUrl, initial.instagramUrl)
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  app.setHash('#footer')
+  footerField(app, 'settings-footer-social-icon-').props.onChange({ target: { value: 'instagram' } }); app.render()
+  await submit(app)
+  const next = JSON.parse(patches(app)[1].body).footerSocialLinks[0]
+  assert.equal(next.icon, 'instagram')
+  assert.equal(next.iconUrl, null)
+  app.unmount()
+})
+
+test('Social list supports reorder, custom names, disable and delete without exposing or resurrecting legacy fields', async () => {
+  const first = { id: 'first', label: 'اخبار ما', href: 'https://example.com/first', icon: 'telegram', iconUrl: null, enabled: true }
+  const second = { id: 'second', label: '', href: 'https://example.com/second', icon: 'instagram', iconUrl: null, enabled: true }
+  const initial = { ...canonical, instagramUrl: 'https://instagram.com/old', telegramUrl: 'https://t.me/old', footerSocialLinks: [first, second] }
+  const saved = { ...initial, version: 3, footerSocialLinks: [] }
+  const app = page({ 'GET /api/admin/site-settings': [response(initial)], 'PATCH /api/admin/site-settings': [response(saved), response(saved)] }, { hash: '#footer' })
+  await settle(); app.render()
+  for (const key of ['instagramUrl', 'telegramUrl', 'eitaaUrl', 'whatsappUrl']) assert.equal(field(app, key), undefined)
+  accessibleButton(app, 'انتقال شبکهٔ اجتماعی 1 به پایین').props.onClick(); app.render()
+  assert.equal(footerField(app, 'settings-footer-social-href-').props.value, second.href)
+  footerField(app, 'settings-footer-social-label-').props.onChange({ target: { value: 'همراه ما باشید' } }); app.render()
+  footerField(app, 'settings-footer-social-enabled-').props.onChange({ target: { checked: false } }); app.render()
+  await submit(app); app.render()
+  const payload = JSON.parse(patches(app)[0].body)
+  assert.equal(payload.footerSocialLinks[0].id, 'second')
+  assert.equal(payload.footerSocialLinks[0].label, 'همراه ما باشید')
+  assert.equal(payload.footerSocialLinks[0].enabled, false)
+  assert.equal(payload.instagramUrl, initial.instagramUrl)
+  assert.equal(footerField(app, 'settings-footer-social-href-'), undefined)
+  assert.match(text(app.tree), /هنوز شبکه‌ای اضافه نشده است/)
+  field(app, 'footerDescription').props.onChange({ target: { value: 'معرفی تازه' } }); app.render()
+  await submit(app)
+  assert.deepEqual(JSON.parse(patches(app)[1].body).footerSocialLinks, [])
+  app.unmount()
+
+  const deleteApp = page({ 'GET /api/admin/site-settings': [response(initial)] }, { hash: '#footer' })
+  await settle(); deleteApp.render()
+  accessibleButton(deleteApp, 'حذف شبکهٔ اجتماعی 1').props.onClick(); deleteApp.render()
+  assert.equal(footerField(deleteApp, 'settings-footer-social-href-').props.value, second.href)
+  accessibleButton(deleteApp, 'حذف شبکهٔ اجتماعی 1').props.onClick(); deleteApp.render()
+  await submit(deleteApp)
+  assert.deepEqual(JSON.parse(patches(deleteApp)[0].body).footerSocialLinks, [])
+  deleteApp.unmount()
+})
+
+test('Invalid social URL and a missing custom icon each reveal and focus the correct hidden field', async () => {
+  const social = { id: 'custom-link', label: '', href: 'https://example.com/channel', icon: 'link', iconUrl: null, enabled: true }
+  for (const scenario of ['href', 'custom']) {
+    const app = page({ 'GET /api/admin/site-settings': [response({ ...canonical, footerSocialLinks: [social] })] }, { hash: '#footer' })
+    await settle(); app.render()
+    let target
+    if (scenario === 'href') {
+      target = footerField(app, 'settings-footer-social-href-')
+      target.props.onChange({ target: { value: '/products' } }); app.render()
+    } else {
+      footerField(app, 'settings-footer-social-icon-').props.onChange({ target: { value: 'custom' } }); app.render()
+      target = footerField(app, 'settings-footer-social-upload-')
+    }
+    app.setHash('#contact')
+    await submit(app); app.render()
+    assert.equal(patches(app).length, 0)
+    assert.deepEqual(visibleSections(app), ['footer'])
+    assert.equal(app.focus.at(-1), target.props.id)
+    app.unmount()
+  }
+})
+
+test('Social list enforces its item limit and duplicate object edits stay clean', async () => {
+  const social = { id: 'same', label: '', href: 'https://example.com/same', icon: 'link', iconUrl: null, enabled: true }
+  const app = page({ 'GET /api/admin/site-settings': [response({ ...canonical, footerSocialLinks: [social] })] }, { hash: '#footer' })
+  await settle(); app.render()
+  footerField(app, 'settings-footer-social-label-').props.onChange({ target: { value: '' } }); app.render()
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  for (let i = 1; i < 12; i++) { button(app, 'افزودن شبکه یا لینک').props.onClick(); app.render() }
+  assert.equal(button(app, 'افزودن شبکه یا لینک').props.disabled, true)
   app.unmount()
 })
