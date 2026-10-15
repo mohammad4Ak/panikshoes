@@ -77,18 +77,24 @@ test('Banner content stays escaped and only labeled actions create links', () =>
   assert.doesNotMatch(renderBanner({ homeBannerLink: null }), /<a /)
 })
 
-test('Selection guide links only real catalog categories using encoded IDs and available-stock filtering', () => {
+test('Panik selection guide links real categories and separates loafers from occasion shoes without hiding sold-out models', () => {
   const html = renderGuide([
-    { id: 'hiking &/1', name: 'کوهنوردی <آزمایشی>', slug: 'hiking' },
-    { id: 'formal', name: 'رسمی', slug: 'formal' },
+    { id: 'hiking', name: 'کوهنوردی', slug: 'hiking' },
+    { id: 'formal &/1', name: 'رسمی', slug: 'formal' },
     { id: 'daily', name: 'کتانی', slug: 'sneaker' },
   ])
-  assert.match(html, /href="\/products\?cat=hiking%20%26%2F1&amp;stock=1"/)
-  assert.match(html, /href="\/products\?cat=daily&amp;stock=1"/)
-  assert.match(html, /کوهنوردی &lt;آزمایشی&gt;/)
-  assert.doesNotMatch(html, /cat=formal|cat=waterproofs|بزن به دلِ طبیعت/)
+  assert.match(html, /href="\/products\?cat=daily"/)
+  assert.match(html, /href="\/products\?cat=formal%20%26%2F1&amp;q=%D9%84%D9%88%D9%81%D8%B1"/)
+  assert.match(html, /href="\/products\?cat=formal%20%26%2F1&amp;q=%D9%85%D8%AC%D9%84%D8%B3%DB%8C"/)
+  assert.doesNotMatch(html, /stock=1|cat=hiking|cat=waterproofs|کوهنوردی|بزن به دلِ طبیعت/)
   assert.equal(renderGuide([]), '')
-  assert.equal(renderGuide([{ id: 'formal', name: 'رسمی', slug: 'formal' }]), '')
+  assert.equal(renderGuide([{ id: 'hiking', name: 'کوهنوردی', slug: 'hiking' }]), '')
+  const formalOnly = renderGuide([{ id: 'formal', name: 'رسمی', slug: 'formal' }])
+  assert.equal((formalOnly.match(/<article /g) ?? []).length, 2)
+  assert.doesNotMatch(formalOnly, /cat=daily|cat=undefined/)
+  const dailyOnly = renderGuide([{ id: 'daily', name: 'کتانی', slug: 'sneaker' }])
+  assert.equal((dailyOnly.match(/<article /g) ?? []).length, 1)
+  assert.doesNotMatch(dailyOnly, /q=|cat=undefined/)
 })
 
 test('Purchase information uses supplied active methods and describes manual review and invoice timing', () => {

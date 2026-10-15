@@ -39,25 +39,28 @@ export function HomeBanner({ settings }: { settings: SiteSettings }) {
 
 const selectionGuides = [
   {
-    slug: 'sneaker', number: '۰۱', word: 'DAY',
-    title: 'همراهِ هر روز',
-    description: 'برای رفت‌وآمد و پیاده‌روی معمول، وزن کفش و انعطاف جلوی پا را بررسی کن.',
-    focus: 'سبکی و انعطاف',
-    note: 'فضای پنجه و جنس رویه را با استفادهٔ روزانه‌ات بسنج.',
+    id: 'daily', slug: 'sneaker', number: '۰۱', word: 'DAILY',
+    collection: 'کتانی زنانه', query: '', action: 'دیدن کتانی‌ها',
+    title: 'همراهِ روزهای شلوغ',
+    description: 'برای استایل روزمره، کتانی را با جین یا شلوار پارچه‌ای ست کن. هنگام پرو، فضای جلوی انگشت‌ها و فیت پاشنه را بررسی کن.',
+    focus: 'فضای پنجه و قالب کفش',
+    note: 'قالب همهٔ مدل‌ها یکسان نیست؛ راهنمای سایز همان محصول را بخوان و فقط به شمارهٔ سایز اکتفا نکن.',
   },
   {
-    slug: 'waterproofs', number: '۰۲', word: 'OUT',
-    title: 'بزن به دلِ طبیعت',
-    description: 'روی خاک و مسیرهای ناهموار، به آج زیره و پوشش رویه توجه کن.',
-    focus: 'آج زیره و پوشش رویه',
-    note: 'مقاومت در برابر آب را در مشخصات هر مدل بررسی کن.',
+    id: 'loafer', slug: 'formal', number: '۰۲', word: 'LOAFER',
+    collection: 'لوفر زنانه', query: 'لوفر', action: 'دیدن لوفرها',
+    title: 'مرتب، به سبک هر روز',
+    description: 'برای استایل کاری و نیمه‌رسمی، لوفر انتخابی ساده برای ست‌کردن است. چون بند ندارد، به فیت کفش دور پا و پشت پاشنه دقت کن.',
+    focus: 'فیت پاشنه و ارتفاع لژ',
+    note: 'هنگام راه‌رفتن، پاشنهٔ پا نباید از کفش بیرون بیاید. ارتفاع لژ و جنس رویه را در مشخصات هر مدل ببین.',
   },
   {
-    slug: 'hiking', number: '۰۳', word: 'UP',
-    title: 'یک مسیر بالاتر',
-    description: 'برای شیب و مسیرهای سنگی، ساختار زیره و نگهداری پا اهمیت بیشتری دارد.',
-    focus: 'ساختار زیره و ثبات',
-    note: 'مدل را متناسب با سختی مسیر و مدت برنامه انتخاب کن.',
+    id: 'occasion', slug: 'formal', number: '۰۳', word: 'DRESS',
+    collection: 'کفش مجلسی', query: 'مجلسی', action: 'دیدن مدل‌های مجلسی',
+    title: 'برای قرارهای خاص',
+    description: 'کفش مجلسی را با لباس و مدت استفاده‌ات انتخاب کن. ارتفاع و پهنای پاشنه، فضای پنجه و امکان تنظیم بند را کنار ظاهر کفش بسنج.',
+    focus: 'پاشنه، پنجه و تنظیم بند',
+    note: 'در مدل‌های بنددار، بند باید بدون فشار روی پا بسته شود. پیش از انتخاب، عکس‌های واقعی و مشخصات مدل را بررسی کن.',
   },
 ] as const
 
@@ -73,23 +76,23 @@ export function HomeSelectionGuide({ categories }: { categories: HomeCategory[] 
       <div className={styles.sectionHeading} data-reveal>
         <div>
           <p className={styles.sectionEyebrow}><span /> راهنمای انتخاب</p>
-          <h2 id="home-guide-title">اول مسیرت، بعد کفشت.</h2>
+          <h2 id="home-guide-title">کفشِ مناسبِ روز تو.</h2>
         </div>
-        <p className={styles.sectionIntro}>چند نکتهٔ ساده برای پیدا کردن مدلی که به کارت می‌آید.</p>
+        <p className={styles.sectionIntro}>کتانی، لوفر یا مجلسی؟ برای انتخاب از مدل‌های پانیک، به کاربرد، قالب و جزئیات هر کفش دقت کن.</p>
       </div>
       <div className={styles.guideGrid}>
         {guides.map((guide, index) => (
-          <article key={guide.slug} className={styles.guideCard} data-reveal data-reveal-delay={index}>
+          <article key={guide.id} className={styles.guideCard} data-reveal data-reveal-delay={index}>
             <div className={styles.guideTop}>
               <span className={styles.guideNumber}>{guide.number}</span>
               <span className={styles.guideWord} dir="ltr" aria-hidden="true">{guide.word}</span>
             </div>
-            <p className={styles.guideCollection}>{guide.category.name}</p>
+            <p className={styles.guideCollection}>{guide.collection}</p>
             <h3>{guide.title}</h3>
             <p className={styles.guideDescription}>{guide.description}</p>
             <div className={styles.guideFocus}><span>ویژگی‌های مهم</span><strong>{guide.focus}</strong><p>{guide.note}</p></div>
-            <Link href={`/products?cat=${encodeURIComponent(guide.category.id)}&stock=1`} className={styles.guideAction} data-motion="action">
-              <span>مدل‌های {guide.category.name}</span><ArrowUpLeft size={19} />
+            <Link href={`/products?cat=${encodeURIComponent(guide.category.id)}${guide.query ? `&q=${encodeURIComponent(guide.query)}` : ''}`} className={styles.guideAction} data-motion="action">
+              <span>{guide.action}</span><ArrowUpLeft size={19} />
             </Link>
           </article>
         ))}

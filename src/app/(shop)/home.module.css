@@ -106,20 +106,20 @@
 .productPlaceholder { position: absolute; inset: 0; margin: auto; color: var(--muted); }
 .empty { background: white; padding: 45px; border-radius: 28px; color: var(--muted); text-align: center; }
 .edits { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.cityEdit, .outdoorEdit { position: relative; overflow: hidden; border-radius: 34px; min-height: 345px; padding: 38px; isolation: isolate; }
-.cityEdit { background: rgb(var(--theme-accent, 215 247 106)); color: rgb(var(--theme-ink, 31 67 44)); }
-.editLabel { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; position: relative; z-index: 1; }
-.edits h2 { font-size: clamp(30px, 3.2vw, 43px); font-weight: 850; line-height: 1.5; letter-spacing: -1px; margin-top: 20px; position: relative; z-index: 1; }
-.cityEdit p { font-size: 12px; margin-top: 10px; position: relative; z-index: 1; }
-.editAction { display: inline-flex; align-items: center; gap: 22px; border-radius: 50px; background: white; color: rgb(var(--theme-ink, 20 33 28)); padding: 12px 17px; font-size: 11px; font-weight: 600; margin-top: 24px; position: relative; z-index: 1; transition: transform .25s; }
+.cityEdit, .outdoorEdit { position: relative; overflow: hidden; border-radius: 34px; min-height: 345px; padding: 38px; isolation: isolate; display: flex; align-items: center; }
+.cityEdit { background: #efe2cb; color: #44311f; }
+.outdoorEdit { background: #28211f; color: #fff8ee; }
+.editImage { object-fit: cover; object-position: left center; z-index: -2; transition: transform .7s; }
+.cityEdit::after, .outdoorEdit::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.cityEdit::after { background: linear-gradient(270deg, #f5ead7ed 0%, #f5ead7b3 28%, transparent 56%); }
+.outdoorEdit::after { background: linear-gradient(270deg, #211b19ed 0%, #211b19b3 28%, transparent 56%); }
+.editCopy { width: 42%; max-width: 290px; min-width: 0; position: relative; z-index: 1; }
+.editLabel { display: inline-block; font-size: 11px; font-weight: 500; line-height: 1.8; opacity: .85; }
+.edits h2 { font-size: clamp(28px, 3vw, 41px); font-weight: 850; line-height: 1.5; letter-spacing: -1px; margin-top: 16px; }
+.editAction { display: inline-flex; align-items: center; max-width: 100%; gap: 12px; border-radius: 50px; background: #fffdf8; color: #3b3027; padding: 12px 16px; font-size: 11px; font-weight: 600; line-height: 1.7; margin-top: 24px; transition: transform .25s; }
+.editAction svg { flex-shrink: 0; }
 .edits a:hover .editAction { transform: translateX(-4px); }
-.cityWord { position: absolute; left: -3px; bottom: 39px; transform: rotate(-14deg); font: italic 900 clamp(90px, 12vw, 170px)/1 Arial, sans-serif; letter-spacing: -12px; color: rgb(var(--theme-on-soft, 67 108 41) / 0.25098); z-index: -1; }
-.cityRings { position: absolute; width: 220px; height: 340px; border: 1px solid rgb(var(--theme-on-soft, 85 124 36) / 0.2); border-radius: 50%; left: 12px; top: -100px; transform: rotate(-30deg); z-index: -1; }
-.cityRings::after { content: ''; position: absolute; inset: 25px -30px; border: 1px solid rgb(var(--theme-on-soft, 85 124 36) / 0.2); border-radius: 50%; }
-.outdoorEdit { color: white; background: rgb(var(--theme-dark, 38 62 61)); }
-.outdoorEdit > img { object-fit: cover; object-position: 60% center; transition: transform .7s; z-index: -2; }
-.outdoorEdit::after { content: ''; position: absolute; inset: 0; background: linear-gradient(270deg, rgb(var(--theme-dark, 17 40 33) / 0.901961), rgb(var(--theme-dark, 17 40 33) / 0.094118)); z-index: -1; }
-.outdoorEdit:hover > img { transform: scale(1.035); }
+@media (hover: hover) and (pointer: fine) { .edits a:hover .editImage { transform: scale(1.025); } }
 .help { display: flex; align-items: center; gap: 21px; padding: 32px 8px 20px; }
 .helpIcon { display: grid; place-items: center; width: 61px; height: 61px; border-radius: 21px; background: rgb(var(--theme-brand-soft, 231 238 233)); color: var(--green); flex-shrink: 0; }
 .help h2 { font-weight: 750; font-size: 18px; }
@@ -148,7 +148,23 @@
   .categoryArrow { display: block; }
   .products { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .product h3 { min-height: 0; }
-  .cityEdit, .outdoorEdit { padding: 28px; }
+  .cityEdit, .outdoorEdit { min-height: 285px; padding: 26px; }
+  .editImage { object-fit: contain; }
+  .edits h2 { font-size: 28px; }
+  .editAction { font-size: 10px; gap: 8px; padding: 11px 13px; margin-top: 20px; }
+}
+/* Match the campaign photos' ratio so narrow cards have no empty image bands. */
+@media (max-width: 768px) {
+  .cityEdit, .outdoorEdit { aspect-ratio: 3 / 2; min-height: 0; }
+  .editImage { object-fit: cover; }
+}
+@media (min-width: 701px) and (max-width: 768px) {
+  .cityEdit, .outdoorEdit { padding: 20px; }
+  .editCopy { width: 46%; }
+  .edits h2 { font-size: 22px; line-height: 1.45; margin-top: 12px; }
+  .editLabel { font-size: 9px; }
+  .editAction { font-size: 9px; gap: 6px; padding: 9px 11px; margin-top: 14px; }
+  .editAction svg { width: 15px; }
 }
 @media (max-width: 700px) {
   .home { padding-top: 14px; }
@@ -196,15 +212,23 @@
   .productArrow svg { width: 17px; }
   .productSection { padding-block: 8px 32px; }
   .edits { grid-template-columns: 1fr; gap: 16px; }
-  .cityEdit, .outdoorEdit { border-radius: 28px; min-height: 310px; padding: 27px; }
-  .edits h2 { font-size: 36px; }
-  .cityWord { font-size: 135px; }
+  .cityEdit, .outdoorEdit { border-radius: 28px; padding: 27px; }
+  .editCopy { width: 48%; max-width: 240px; }
+  .edits h2 { font-size: clamp(24px, 5.8vw, 34px); }
   .help { flex-wrap: wrap; gap: 13px; padding: 30px 5px 12px; }
   .helpIcon { width: 47px; height: 47px; border-radius: 17px; }
   .help > div { flex: 1; }
   .help h2 { font-size: 16px; }
   .help p { font-size: 10px; }
   .help .allLink { margin-inline: 60px 0; }
+}
+
+@media (max-width: 420px) {
+  .cityEdit, .outdoorEdit { padding: 20px; }
+  .edits h2 { font-size: clamp(20px, 5.8vw, 24px); line-height: 1.4; margin-top: 10px; }
+  .editLabel { font-size: 9px; }
+  .editAction { font-size: 9px; gap: 6px; padding: 9px 11px; margin-top: 14px; }
+  .editAction svg { width: 15px; }
 }
 
 @media (min-width: 701px) and (max-width: 760px) { .hero { --hero-top: 100px; } }

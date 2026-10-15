@@ -2,7 +2,7 @@ import { SneakerIcon } from '@/components/ui/BrandIcons'
 import Image from 'next/image'
 import Link from 'next/link'
 import { connection } from 'next/server'
-import { ArrowLeft, ArrowUpLeft, Mountain, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, ArrowUpLeft, SlidersHorizontal } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
 import { expireUnpaidOrders, methodAvailability } from '@/lib/payments'
 import { HomeBanner, HomeSelectionGuide, HomePurchaseInfo } from '@/components/shop/HomeContent'
@@ -123,16 +123,20 @@ export default async function HomePage() {
 
         <section className={styles.edits} aria-label="مجموعه‌های پیشنهادی">
           <Link href={categoryHref('sneaker')} className={styles.cityEdit} data-reveal>
-            <span className={styles.editLabel}><SneakerIcon size={17} /> استایلِ هر روز</span>
-            <h2>شهر، زمینِ<br />بازیِ توئه.</h2>
-            <p>کتانی‌هایی برای ریتم زندگی تو.</p>
-            <span className={styles.editAction}>کشف کتانی‌ها <ArrowLeft size={18} /></span>
-            <span className={styles.cityWord} aria-hidden="true" dir="ltr">GO!</span>
-            <div className={styles.cityRings} aria-hidden="true" />
+            <Image className={styles.editImage} src="/uploads/panik-everyday-collection-20261015.webp" alt="کتانی زنانه پانیک مدل سلین در فضایی گرم با رنگ‌های کرم و عسلی" fill sizes="(max-width: 700px) 100vw, 50vw" />
+            <div className={styles.editCopy}>
+              <span className={styles.editLabel}>استایل روزمره</span>
+              <h2>هر روز،<br />به سبک تو.</h2>
+              <span className={styles.editAction}><span>دیدن کتانی‌ها</span><ArrowLeft size={18} /></span>
+            </div>
           </Link>
-          <Link href={categoryHref('hiking')} className={styles.outdoorEdit} data-reveal data-reveal-delay="1">
-            <Image src="/uploads/1787512292121-lf4d3b0r.webp" alt="کفش کوهنوردی روی صخره در ارتفاعات" fill sizes="(max-width: 700px) 100vw, 50vw" />
-            <div className={styles.outdoorCopy}><span className={styles.editLabel}><Mountain size={17} /> وقتِ ماجراجوییه</span><h2>از مسیر همیشگی<br />بزن بیرون.</h2><span className={styles.editAction}>مجموعهٔ کوهنوردی <ArrowLeft size={18} /></span></div>
+          <Link href={categoryHref('formal')} className={styles.outdoorEdit} data-reveal data-reveal-delay="1">
+            <Image className={styles.editImage} src="/uploads/panik-occasion-collection-20261015.webp" alt="کفش مجلسی مشکی کمربندی پانیک در فضایی تیره و گرم" fill sizes="(max-width: 700px) 100vw, 50vw" />
+            <div className={styles.editCopy}>
+              <span className={styles.editLabel}>برای لحظه‌های خاص</span>
+              <h2>یک انتخاب،<br />تمامِ استایل.</h2>
+              <span className={styles.editAction}><span>مدل‌های مجلسی</span><ArrowLeft size={18} /></span>
+            </div>
           </Link>
         </section>
 
