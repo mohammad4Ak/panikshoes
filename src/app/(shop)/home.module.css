@@ -244,3 +244,6 @@
 @media (prefers-reduced-motion: reduce) {
   .home *, .home *::before, .home *::after { transition: none !important; animation: none !important; }
 }
+.priceStack { display: grid; gap: 4px; min-width: 0; }
+.originalPrice { color: rgb(var(--theme-muted, 105 116 110)); font-size: 10px; font-weight: 400; }
+.discountTag { position: absolute; inset-inline-end: 12px; bottom: 12px; padding: 6px 10px; border-radius: 999px; background: rgb(var(--theme-brand, 18 102 74)); color: white; font-size: 10px; font-weight: 700; }

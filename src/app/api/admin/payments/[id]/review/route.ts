@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { buildInvoiceSnapshot } from '@/lib/invoice'
 import { readSiteSettings } from '@/lib/site-settings'
+import { CouponError, reacquireCouponReservation } from '@/lib/coupons'
 import { nextOrderVersion, paymentDeadline, PaymentError, paymentQuantities, privatePaymentHeaders, receiptMetadataSelect, requireSameOrigin } from '@/lib/payments'
 
 const details = {
@@ -51,6 +52,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           const reserved = await tx.product.updateMany({ where: { id: productId, stock: { gte: quantity } }, data: { stock: { decrement: quantity } } })
           if (reserved.count !== 1) throw new PaymentError('موجودی برای فعال‌سازی این سفارش کافی نیست؛ با خریدار برای جایگزینی یا بازگشت وجه هماهنگ کنید.', 409, 'INSUFFICIENT_STOCK')
         }
+        if (order.couponId) await reacquireCouponReservation(tx, id, order.userId, new Date())
       }
       const reviewedAt = new Date()
       const reviewed = await tx.paymentReceipt.updateMany({ where: { id: receipt.id, orderId: id, status: 'PENDING' }, data: {
@@ -67,6 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(result, { headers: privatePaymentHeaders })
   } catch (error) {
     if (error instanceof PaymentError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status })
+    if (error instanceof CouponError) return NextResponse.json({ error: `ظرفیت کد تخفیف این سفارش قابل رزرو نیست: ${error.message}؛ پیش از تأیید، با خریدار هماهنگ کنید.`, code: error.code }, { status: 409 })
     return NextResponse.json({ error: 'ثبت نتیجه بررسی پرداخت انجام نشد.' }, { status: 500 })
   }
 }

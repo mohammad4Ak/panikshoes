@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, LoaderCircle, Pencil, Plus, RefreshCw, Trash2, Truck, X } from 'lucide-react'
+import FormattedNumberInput from '@/components/ui/FormattedNumberInput'
 import adminStyles from '@/components/admin/admin.module.css'
 import { MAX_SHIPPING_AMOUNT, type ShippingMethodOption } from '@/lib/shipping'
 import styles from './shipping.module.css'
@@ -150,12 +151,12 @@ function ShippingMethodDialog({
         <div className={styles.priceFields}>
           <div className={styles.field}>
             <label htmlFor="shipping-base">هزینه پایه (تومان) <span aria-hidden="true">*</span></label>
-            <input id="shipping-base" type="number" inputMode="numeric" min={0} max={MAX_AMOUNT} step={1} required className="input-field" value={form.baseCost} onChange={(event) => setField('baseCost', event.target.value)} disabled={saving} aria-describedby="shipping-base-help" />
+            <FormattedNumberInput id="shipping-base" min={0} max={MAX_AMOUNT} step={1} required className="input-field" value={form.baseCost} onValueChange={(value) => setField('baseCost', value)} disabled={saving} aria-describedby="shipping-base-help" />
             <p id="shipping-base-help" className={styles.fieldHelp}>هزینه ارسال سفارش با یک جفت کفش</p>
           </div>
           <div className={styles.field}>
             <label htmlFor="shipping-extra">هزینه هر جفت اضافه (تومان) <span aria-hidden="true">*</span></label>
-            <input id="shipping-extra" type="number" inputMode="numeric" min={0} max={MAX_AMOUNT} step={1} required className="input-field" value={form.additionalItemCost} onChange={(event) => setField('additionalItemCost', event.target.value)} disabled={saving} aria-describedby="shipping-extra-help" />
+            <FormattedNumberInput id="shipping-extra" min={0} max={MAX_AMOUNT} step={1} required className="input-field" value={form.additionalItemCost} onValueChange={(value) => setField('additionalItemCost', value)} disabled={saving} aria-describedby="shipping-extra-help" />
             <p id="shipping-extra-help" className={styles.fieldHelp}>برای هر جفت بعد از جفت اول؛ برای نرخ ثابت صفر بگذارید.</p>
           </div>
         </div>
@@ -171,12 +172,12 @@ function ShippingMethodDialog({
         <div className={styles.priceFields}>
           <div className={styles.field}>
             <label htmlFor="shipping-free">حد ارسال رایگان (تومان)</label>
-            <input id="shipping-free" type="number" inputMode="numeric" min={0} max={MAX_AMOUNT} step={1} className="input-field" placeholder="بدون حد ارسال رایگان" value={form.freeShippingThreshold} onChange={(event) => setField('freeShippingThreshold', event.target.value)} disabled={saving} aria-describedby="shipping-free-help" />
+            <FormattedNumberInput id="shipping-free" min={0} max={MAX_AMOUNT} step={1} className="input-field" placeholder="بدون حد ارسال رایگان" value={form.freeShippingThreshold} onValueChange={(value) => setField('freeShippingThreshold', value)} disabled={saving} aria-describedby="shipping-free-help" />
             <p id="shipping-free-help" className={styles.fieldHelp}>اگر جمع قیمت کالاها به این مبلغ برسد، ارسال رایگان است. خالی یعنی بدون ارسال رایگان.</p>
           </div>
           <div className={styles.field}>
             <label htmlFor="shipping-sort">ترتیب نمایش</label>
-            <input id="shipping-sort" type="number" inputMode="numeric" min={0} max={1_000_000} step={1} required className="input-field" value={form.sortOrder} onChange={(event) => setField('sortOrder', event.target.value)} disabled={saving} aria-describedby="shipping-sort-help" />
+            <FormattedNumberInput id="shipping-sort" min={0} max={1_000_000} step={1} required className="input-field" value={form.sortOrder} onValueChange={(value) => setField('sortOrder', value)} disabled={saving} aria-describedby="shipping-sort-help" />
             <p id="shipping-sort-help" className={styles.fieldHelp}>عدد کمتر، جایگاه بالاتر در فهرست</p>
           </div>
         </div>

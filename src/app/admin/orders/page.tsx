@@ -7,12 +7,18 @@ import { formatPrice } from '@/lib/utils'
 import type { InvoiceMetadata } from '@/lib/invoice'
 import type { AdminOrdersDashboard, AdminOrdersPagination } from '@/lib/admin-orders'
 import InvoiceDownload from '@/components/shop/InvoiceDownload'
+import PersianDatePicker from '@/components/ui/PersianDatePicker'
+import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import styles from '@/components/admin/admin.module.css'
 import ui from './orders.module.css'
 
 interface Order {
   id: string
   total: number
+  subtotal?: number | null
+  productDiscount?: number
+  couponDiscount?: number
+  couponCode?: string | null
   shippingMethodName: string | null
   shippingCost: number
   status: string
@@ -27,7 +33,7 @@ interface Order {
   createdAt: string
   invoice?: InvoiceMetadata | null
   user: { name: string; email: string }
-  items: { id: string; quantity: number; size: number; color: string; price: number; productName?: string | null; product: { name: string } }[]
+  items: { id: string; quantity: number; size: number; color: string; price: number; originalPrice?: number | null; couponDiscount?: number; productName?: string | null; product: { name: string } }[]
 }
 
 const statusLabels: Record<string, { label: string; color: string }> = {
@@ -238,22 +244,22 @@ export default function AdminOrdersPage() {
         <div className={ui.sectionHeading}><h2 id="orders-filters-title"><SlidersHorizontal size={17} aria-hidden="true" />جستجو و فیلتر سفارش‌ها</h2>{filtersActive && <button type="button" className={ui.reset} disabled={busy} onClick={() => resetFilters()}>پاک کردن فیلترها</button>}</div>
         <div className={ui.filterGrid}>
           <label className={ui.searchField} htmlFor="orders-search"><span>جستجو</span><div><Search size={18} aria-hidden="true" /><input id="orders-search" type="search" value={search} maxLength={120} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="شماره سفارش، مشتری، تلفن یا نام کالا" /></div></label>
-          <label className={ui.field} htmlFor="orders-status-filter"><span>وضعیت سفارش</span><select id="orders-status-filter" value={filters.status} disabled={busy} onChange={(event) => updateFilters({ status: event.target.value })}><option value="all">همهٔ وضعیت‌ها</option><option value="active">سفارش‌های فعال</option><option value="PENDING">در انتظار</option>{allStatuses.filter((status) => status !== 'PENDING').map((status) => <option key={status} value={status}>{statusLabels[status].label}</option>)}</select></label>
-          <label className={ui.field} htmlFor="orders-payment-filter"><span>وضعیت پرداخت</span><select id="orders-payment-filter" value={filters.payment} disabled={busy} onChange={(event) => updateFilters({ payment: event.target.value })}><option value="all">همهٔ پرداخت‌ها</option><option value="paid">پرداخت تأییدشده</option><option value="unpaid">پرداخت تأییدنشده</option><option value="AWAITING_REVIEW">رسید منتظر بررسی</option><option value="AWAITING_RECEIPT">در انتظار رسید</option><option value="REJECTED">نیاز به رسید جدید</option><option value="EXPIRED">مهلت تمام‌شده</option></select></label>
-          <label className={ui.field} htmlFor="orders-range-filter"><span>زمان ثبت سفارش</span><select id="orders-range-filter" value={filters.range} disabled={busy} onChange={(event) => { if(event.target.value !== 'custom') updateFilters({ range: event.target.value, from: '', to: '' }) }}><option value="all">همهٔ روزها</option><option value="today">امروز</option><option value="7d">۷ روز اخیر</option><option value="30d">۳۰ روز اخیر</option>{filters.range === 'custom' && <option value="custom">بازهٔ دلخواه</option>}</select></label>
+          <label className={ui.field} htmlFor="orders-status-filter"><span>وضعیت سفارش</span><EnhancedSelect nativeAppearance id="orders-status-filter" value={filters.status} disabled={busy} onChange={(event) => updateFilters({ status: event.target.value })}><option value="all">همهٔ وضعیت‌ها</option><option value="active">سفارش‌های فعال</option><option value="PENDING">در انتظار</option>{allStatuses.filter((status) => status !== 'PENDING').map((status) => <option key={status} value={status}>{statusLabels[status].label}</option>)}</EnhancedSelect></label>
+          <label className={ui.field} htmlFor="orders-payment-filter"><span>وضعیت پرداخت</span><EnhancedSelect nativeAppearance id="orders-payment-filter" value={filters.payment} disabled={busy} onChange={(event) => updateFilters({ payment: event.target.value })}><option value="all">همهٔ پرداخت‌ها</option><option value="paid">پرداخت تأییدشده</option><option value="unpaid">پرداخت تأییدنشده</option><option value="AWAITING_REVIEW">رسید منتظر بررسی</option><option value="AWAITING_RECEIPT">در انتظار رسید</option><option value="REJECTED">نیاز به رسید جدید</option><option value="EXPIRED">مهلت تمام‌شده</option></EnhancedSelect></label>
+          <label className={ui.field} htmlFor="orders-range-filter"><span>زمان ثبت سفارش</span><EnhancedSelect nativeAppearance id="orders-range-filter" value={filters.range} disabled={busy} onChange={(event) => { if(event.target.value !== 'custom') updateFilters({ range: event.target.value, from: '', to: '' }) }}><option value="all">همهٔ روزها</option><option value="today">امروز</option><option value="7d">۷ روز اخیر</option><option value="30d">۳۰ روز اخیر</option>{filters.range === 'custom' && <option value="custom">بازهٔ دلخواه</option>}</EnhancedSelect></label>
         </div>
         <details className={ui.dateDetails}>
           <summary>انتخاب بازهٔ دلخواه{filters.range === 'custom' && <span> · فعال</span>}</summary>
           <form onSubmit={applyDates} className={ui.dateForm}>
-            <label className={ui.field} htmlFor="orders-date-from"><span>از تاریخ (میلادی)</span><input id="orders-date-from" type="date" value={from} max={to || undefined} required disabled={busy} onChange={(event) => setFrom(event.target.value)} /></label>
-            <label className={ui.field} htmlFor="orders-date-to"><span>تا تاریخ (میلادی)</span><input id="orders-date-to" type="date" value={to} min={from || undefined} required disabled={busy} onChange={(event) => setTo(event.target.value)} /></label>
+            <div className={ui.field}><span><label htmlFor="orders-date-from">از تاریخ</label></span><PersianDatePicker id="orders-date-from" value={from} max={to || undefined} required disabled={busy} onChange={setFrom} /></div>
+            <div className={ui.field}><span><label htmlFor="orders-date-to">تا تاریخ</label></span><PersianDatePicker id="orders-date-to" value={to} min={from || undefined} required disabled={busy} onChange={setTo} /></div>
             <button type="submit" className={ui.applyDates} disabled={busy}>اعمال بازه</button>
             {dateError && <p className={ui.dateError} role="alert">{dateError}</p>}
           </form>
         </details>
       </section>
       {error && <div role="alert" className={ui.error}>{error} <button type="button" disabled={busy} onClick={() => void loadOrders()}>بارگذاری دوباره</button></div>}
-      <div className={ui.listHeading}><h2>فهرست سفارش‌ها</h2><p role="status" aria-live="polite">{loading ? 'در حال دریافت سفارش‌ها…' : loadedQuery === query ? `${formatPrice(pagination.total)} سفارش${filtersActive ? ' مطابق فیلترها' : ''}` : 'دریافت اطلاعات انجام نشد'}</p><label className={ui.pageSize} htmlFor="orders-page-size">تعداد در صفحه<select id="orders-page-size" value={filters.pageSize} disabled={busy} onChange={(event) => updateFilters({ pageSize: Number(event.target.value) })}><option value={20}>۲۰</option><option value={50}>۵۰</option></select></label></div>
+      <div className={ui.listHeading}><h2>فهرست سفارش‌ها</h2><p role="status" aria-live="polite">{loading ? 'در حال دریافت سفارش‌ها…' : loadedQuery === query ? `${formatPrice(pagination.total)} سفارش${filtersActive ? ' مطابق فیلترها' : ''}` : 'دریافت اطلاعات انجام نشد'}</p><label className={ui.pageSize} htmlFor="orders-page-size">تعداد در صفحه<EnhancedSelect nativeAppearance small id="orders-page-size" value={filters.pageSize} disabled={busy} onChange={(event) => updateFilters({ pageSize: Number(event.target.value) })}><option value={20}>۲۰</option><option value={50}>۵۰</option></EnhancedSelect></label></div>
 
       <div className={styles.tablePanel} aria-busy={loading}>
         {loading ? (
@@ -295,7 +301,7 @@ export default function AdminOrdersPage() {
                     </td>
                     <td className="px-4 py-3 md:px-6 md:py-4 font-bold">{formatPrice(order.total)}<span className={`block text-xs font-normal mt-1 ${order.verified ? 'text-green-700' : 'text-amber-700'}`}>{order.verified ? 'پرداخت تأییدشده' : paymentLabels[order.paymentStatus ?? ''] || 'پرداخت تأیید نشده'}</span>{order.paymentMethod === 'bank_transfer' && <Link href={`/admin/payments?orderId=${encodeURIComponent(order.id)}`} className="inline-block mt-2 text-xs font-medium text-brand underline underline-offset-4">{order.paymentStatus === 'AWAITING_REVIEW' ? 'بررسی رسید' : 'جزئیات پرداخت'}</Link>}</td>
                     <td className="px-6 py-4">
-                      <select
+                      <EnhancedSelect nativeAppearance small
                         value={order.status}
                         disabled={busy || loading || search.trim() !== filters.q}
                         aria-label={`وضعیت سفارش ${order.id.slice(-6)}`}
@@ -305,7 +311,7 @@ export default function AdminOrdersPage() {
                         {choicesFor(order).map((s) => (
                           <option key={s} value={s}>{s === 'PENDING' && order.paymentStatus === 'AWAITING_REVIEW' ? 'منتظر تأیید پرداخت' : s === 'PENDING' && order.verified ? 'در انتظار بررسی' : statusLabels[s].label}</option>
                         ))}
-                      </select>
+                      </EnhancedSelect>
                     </td>
                     <td className="px-4 py-3 md:px-6 md:py-4 text-mist">
                       {new Date(order.createdAt).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran' })}<span className={ui.orderTime}>{new Date(order.createdAt).toLocaleTimeString('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit' })}</span>
@@ -332,10 +338,15 @@ export default function AdminOrdersPage() {
                               <span>
                                 {item.productName || item.product.name} — سایز {item.size} — رنگ {item.color} × {item.quantity}
                               </span>
-                              <span>{formatPrice(item.price * item.quantity)} تومان</span>
+                              <span className="text-left">{item.originalPrice != null && item.originalPrice > item.price && <del className="block text-xs text-mist">{formatPrice(item.originalPrice * item.quantity)} تومان</del>}{formatPrice(item.price * item.quantity - (item.couponDiscount ?? 0))} تومان{(item.couponDiscount ?? 0) > 0 && <small className="block text-brand">سهم تخفیف کد: {formatPrice(item.couponDiscount!)} تومان</small>}</span>
                             </div>
                           ))}
                           <div className="border-t border-line pt-3 space-y-2">
+                            {((order.productDiscount ?? 0) > 0 || (order.couponDiscount ?? 0) > 0) && <>
+                              <p className="flex justify-between gap-3"><span className="text-mist">جمع اولیهٔ کالاها</span><span>{formatPrice(order.subtotal ?? order.total - order.shippingCost + (order.productDiscount ?? 0) + (order.couponDiscount ?? 0))} تومان</span></p>
+                              {(order.productDiscount ?? 0) > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف محصولات</span><span>−{formatPrice(order.productDiscount!)} تومان</span></p>}
+                              {(order.couponDiscount ?? 0) > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف کد {order.couponCode && <bdi>{order.couponCode}</bdi>}</span><span>−{formatPrice(order.couponDiscount!)} تومان</span></p>}
+                            </>}
                             <p className="flex justify-between gap-3"><span className="text-mist">روش ارسال</span><span>{order.shippingMethodName || 'ثبت نشده'}</span></p>
                             <p className="flex justify-between gap-3"><span className="text-mist">هزینهٔ ارسال</span><span>{order.shippingCost === 0 ? 'رایگان' : `${formatPrice(order.shippingCost)} تومان`}</span></p>
                             <p className="flex justify-between gap-3 font-bold"><span>مجموع سفارش</span><span>{formatPrice(order.total)} تومان</span></p>

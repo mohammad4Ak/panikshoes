@@ -65,7 +65,9 @@ function mount({ queues = {}, initial = report() } = {}) {
     })
     return compiledModule.exports
   }
-  dependencies['@/components/ui/EnhancedSelect'] = load('src/components/ui/EnhancedSelect.tsx')
+  // Keep moderation behavior independent of the shared control's rendering;
+  // EnhancedSelect preserves this native change-event and option contract.
+  dependencies['@/components/ui/EnhancedSelect'] = { __esModule: true, default: 'select' }
   const component = load('src/app/admin/reviews/page.tsx').default
   const render = () => { cursor = 0; tree = component(); effects.splice(0).forEach(effect => effect()); return tree }
   render()

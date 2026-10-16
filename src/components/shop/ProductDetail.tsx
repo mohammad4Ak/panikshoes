@@ -9,6 +9,7 @@ import { ArrowLeft, Minus, Plus, RotateCcw, ShieldCheck, ShoppingBag, Star, Truc
 import { useCart } from '@/lib/cart'
 import { toast } from '@/lib/toast'
 import { formatPrice } from '@/lib/utils'
+import { productPricing } from '@/lib/pricing'
 import styles from './commerce.module.css'
 import engagement from './product-engagement.module.css'
 import ProductReviews from './ProductReviews'
@@ -19,6 +20,9 @@ interface ApiProduct {
   slug: string
   description: string
   price: number
+  salePrice?: number | null
+  saleStartsAt?: string | null
+  saleEndsAt?: string | null
   images: string[]
   sizes: number[]
   colors: string[]
@@ -37,6 +41,7 @@ export default function ProductDetail({ slug }: { slug: string }) {
   const [activeColor, setActiveColor] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [activeImage, setActiveImage] = useState(0)
+  const [pricingNow, setPricingNow] = useState(() => Date.now())
   const addItem = useCart((state) => state.addItem)
   const syncRating = useCallback(({ average, count }: { average: number; count: number }) => {
     setProduct((current) => current ? { ...current, ratingAverage: average, ratingCount: count } : current)
@@ -52,6 +57,7 @@ export default function ProductDetail({ slug }: { slug: string }) {
       .then((data: ApiProduct) => {
         if (controller.signal.aborted) return
         setProduct(data)
+        setPricingNow(Date.now())
         setQuantity(1)
         setActiveImage(0)
         setSelectedSize(data.sizes?.includes(42) ? 42 : (data.sizes?.[0] ?? null))
@@ -61,6 +67,14 @@ export default function ProductDetail({ slug }: { slug: string }) {
       .finally(() => { if (!controller.signal.aborted) setLoadedSlug(slug) })
     return () => controller.abort()
   }, [slug])
+
+  useEffect(() => {
+    const now = Date.now()
+    const next = [product?.saleStartsAt, product?.saleEndsAt].map(value => value ? Date.parse(value) : NaN).filter(value => Number.isFinite(value) && value > pricingNow)
+    if (!next.length) return
+    const timer = setTimeout(() => setPricingNow(Date.now()), Math.max(0, Math.min(Math.min(...next) - now + 20, 2_147_483_647)))
+    return () => clearTimeout(timer)
+  }, [product, pricingNow])
 
   if (loading) {
     return <div className={styles.page} aria-busy="true" aria-label="در حال بارگذاری محصول"><div className={styles.detailGrid}>
@@ -79,9 +93,11 @@ export default function ProductDetail({ slug }: { slug: string }) {
 
   const outOfStock = product.stock <= 0
   const mainImage = product.images[activeImage] ?? product.images[0]
+  const pricing = productPricing(product, new Date(pricingNow))
   const handleAddToCart = () => {
     if (outOfStock || !selectedSize || !product.sizes.includes(selectedSize)) return
-    addItem({ productId: product.id, name: product.name, price: product.price, image: product.images[0], size: selectedSize, color: activeColor, quantity })
+    const currentPricing = productPricing(product)
+    addItem({ productId: product.id, name: product.name, price: currentPricing.effectivePrice, originalPrice: currentPricing.originalPrice, image: product.images[0], size: selectedSize, color: activeColor, quantity })
     toast('محصول به سبد خرید اضافه شد', product.name)
   }
 
@@ -108,7 +124,10 @@ export default function ProductDetail({ slug }: { slug: string }) {
           {(product.ratingCount ?? 0) > 0 ? <><strong>{new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 1 }).format(product.ratingAverage ?? 0)}</strong><span>از ۵ · {formatPrice(product.ratingCount ?? 0)} امتیاز</span></> : <span>اولین امتیاز را ثبت کن</span>}
         </a>
         <div className={styles.detailPrice}>
-          <p className={styles.price}>{formatPrice(product.price)} <small>تومان</small></p>
+          <div className={styles.priceStack}>
+            {pricing.isDiscounted && <div className={styles.saleLine}><del className={styles.originalPrice}>{formatPrice(pricing.originalPrice)} تومان</del><span className={styles.salePill}>{pricing.discountPercent ? `${formatPrice(pricing.discountPercent)}٪ تخفیف` : 'تخفیف ویژه'}</span></div>}
+            <p className={styles.price}>{formatPrice(pricing.effectivePrice)} <small>تومان</small></p>
+          </div>
           <span className={styles.stock}>{outOfStock ? 'فعلاً ناموجود' : `${formatPrice(product.stock)} جفت موجود در انبار`}</span>
         </div>
         {product.description && <p className={styles.description}>{product.description}</p>}

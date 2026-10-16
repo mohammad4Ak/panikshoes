@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth'
 import { ApiInputError, apiError, integerField, readJsonObject } from '@/lib/api-input'
 import { withProductRatings } from '@/lib/product-reviews'
-import { productInput, validateStockedSizes } from '@/lib/catalog-input'
+import { productInput, productPricingSnapshot, validateProductSale, validateStockedSizes } from '@/lib/catalog-input'
+import { productPricing } from '@/lib/pricing'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -14,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     (await prisma.product.findFirst({ where: { slug: decodedId }, include: { category: true } })) ??
     (await prisma.product.findFirst({ where: { slug: id }, include: { category: true } }))
   if (!product) return NextResponse.json({ error: 'محصول یافت نشد' }, { status: 404 })
-  return NextResponse.json((await withProductRatings([product]))[0])
+  return NextResponse.json({ ...(await withProductRatings([product]))[0], ...productPricing(product) })
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const expectedStock = data.stock === undefined ? undefined : integerField(body.expectedStock, 'موجودی قبلی')
     const existing = await prisma.product.findUnique({ where: { id } })
     if (!existing) throw new ApiInputError('محصول یافت نشد', 404)
+    const guardPricing = ['price', 'salePrice', 'saleStartsAt', 'saleEndsAt'].some(key => key in data)
+    const expectedPricing = guardPricing ? productPricingSnapshot(body.expectedPricing) : null
+    const pricingConflict = () => NextResponse.json({ error: 'قیمت یا تخفیف محصول تغییر کرده است. فرم محصول را دوباره باز کنید.', code: 'PRODUCT_PRICE_CHANGED' }, { status: 409 })
+    if (expectedPricing && (expectedPricing.price !== existing.price || expectedPricing.salePrice !== (existing.salePrice ?? null) ||
+        expectedPricing.saleStartsAt?.getTime() !== existing.saleStartsAt?.getTime() || expectedPricing.saleEndsAt?.getTime() !== existing.saleEndsAt?.getTime())) return pricingConflict()
+    validateProductSale(data, existing)
     const stockConflict = () => NextResponse.json({
       error: 'موجودی محصول تغییر کرده است. موجودی تازه را بارگذاری و عدد مورد نظر را دوباره بررسی کنید.',
       code: 'PRODUCT_STOCK_CHANGED',
@@ -46,11 +53,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const guardStock = data.stock !== undefined || data.sizes !== undefined
     try {
       const product = await prisma.product.update({
-        where: { id, ...(guardStock && { stock: existing.stock }) }, data, include: { category: true },
+        where: { id, ...(guardStock && { stock: existing.stock }), ...expectedPricing }, data, include: { category: true },
       })
       return NextResponse.json(product)
     } catch (error) {
-      if (guardStock && error && typeof error === 'object' && 'code' in error && error.code === 'P2025') return stockConflict()
+      if ((guardStock || guardPricing) && error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+        const latest = await prisma.product.findUnique({ where: { id } })
+        if (guardStock && latest?.stock !== existing.stock) return stockConflict()
+        return guardPricing ? pricingConflict() : stockConflict()
+      }
       throw error
     }
   } catch (error) { return apiError(error, 'خطا در ویرایش محصول') }

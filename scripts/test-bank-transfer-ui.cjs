@@ -57,6 +57,21 @@ function compile(relativePath, loader = 'tsx') {
 const componentCode = compile('src/components/shop/BankTransferPayment.tsx')
 const contractContext = { module: { exports: {} } }
 vm.runInNewContext(compile('src/lib/payment-contract.ts', 'ts'), contractContext)
+const totalsContext = { module: { exports: {} } }
+vm.runInNewContext(compile('src/lib/order-totals.ts', 'ts'), totalsContext)
+
+test('Bank-transfer payment shows separated discounts while preserving the exact payable amount', async () => {
+  const app = mount({ queue: [response(payment({ subtotal: 1000, productDiscount: 100, couponDiscount: 101, couponCode: 'PANIK101', shippingCost: 50, total: 849 }))] })
+  await app.start()
+  assert.match(text(app.tree), /جمع اولیهٔ کالاها/)
+  assert.match(text(app.tree), /تخفیف محصولات/)
+  assert.match(text(app.tree), /PANIK101/)
+  assert.match(text(app.tree), /−\s*100/)
+  assert.match(text(app.tree), /−\s*101/)
+  assert.match(text(app.tree), /849/)
+  assert.match(text(app.tree), /8490/)
+  app.unmount()
+})
 
 // Run real component handlers/effects with monotonic time and abort-aware network
 // doubles. Tests observe customer behavior and requests without touching live data.
@@ -121,6 +136,7 @@ function mount({ queue = [response(payment())], orderId = 'order-1', uuidFailure
     '@/components/ui/BrandIcons': { PaymentStatusIcon: 'PaymentStatusIcon' },
     '@/lib/utils': { formatPrice: (value) => String(value) },
     '@/lib/payment-contract': contractContext.module.exports,
+    '@/lib/order-totals': totalsContext.module.exports,
     './InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
     './bank-transfer.module.css': { __esModule: true, default: new Proxy({}, { get: (_, name) => name }) },
   }

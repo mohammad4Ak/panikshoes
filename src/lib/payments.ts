@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { PAYMENT_WINDOW_MS, MAX_RECEIPT_BYTES, isValidCardNumber } from '@/lib/payment-contract'
 import { isSameOriginRequest } from '@/lib/request-origin'
+import { releaseCouponReservation } from '@/lib/coupons'
+import type { Prisma } from '@prisma/client'
 
 export { PAYMENT_WINDOW_MS } from '@/lib/payment-contract'
 export const privatePaymentHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' }
@@ -43,31 +45,46 @@ export function methodAvailability(method: { id: string; cardNumber: string | nu
 
 // Every mutation claims the order version before changing stock. Expiration,
 // upload, cancellation and review therefore cannot release/reserve it twice.
-export async function expireUnpaidOrders(now = new Date(), orderId?: string): Promise<number> {
-  const candidates = await prisma.order.findMany({
-    where: { ...(orderId ? { id: orderId } : {}), paymentMethod: 'bank_transfer', status: 'PENDING', verified: false,
-      paymentStatus: { in: ['AWAITING_RECEIPT', 'REJECTED'] }, paymentExpiresAt: { lte: now } },
-    select: { id: true }, orderBy: { paymentExpiresAt: 'asc' }, take: 100,
-  })
+export async function expireUnpaidOrders(now = new Date(), orderId?: string, scope?: { productIds: string[]; couponCode: string | null }): Promise<number> {
+  // Checkout must release every expired reservation that can affect its own
+  // stock/coupon, even when unrelated orders fill the background sweep's batch.
+  const filters: Prisma.OrderWhereInput[] = []
+  if (scope?.productIds.length) filters.push({ items: { some: { productId: { in: scope.productIds } } } })
+  if (scope?.couponCode) filters.push({ coupon: { is: { code: scope.couponCode } } })
+  const scoped = filters.length > 0
   let expired = 0
-  for (const candidate of candidates) {
-    expired += await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id: candidate.id }, include: { items: true } })
-      if (!order || order.status !== 'PENDING' || order.verified ||
-          !['AWAITING_RECEIPT', 'REJECTED'].includes(order.paymentStatus) ||
-          !order.paymentExpiresAt || order.paymentExpiresAt > now) return 0
-      const claimed = await tx.order.updateMany({
-        where: { id: order.id, status: 'PENDING', verified: false, paymentStatus: order.paymentStatus,
-          updatedAt: order.updatedAt, paymentExpiresAt: { lte: now } },
-        data: { status: 'CANCELLED', paymentStatus: 'EXPIRED', paymentExpiresAt: null, updatedAt: nextOrderVersion(order.updatedAt) },
-      })
-      if (claimed.count !== 1) return 0
-      for (const [productId, quantity] of paymentQuantities(order.items)) {
-        await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
-      }
-      return 1
+  let cursor: string | undefined
+  do {
+    const candidates = await prisma.order.findMany({
+      where: { ...(orderId ? { id: orderId } : cursor ? { id: { gt: cursor } } : {}),
+        ...(scoped ? { OR: filters } : {}), paymentMethod: 'bank_transfer', status: 'PENDING', verified: false,
+        paymentStatus: { in: ['AWAITING_RECEIPT', 'REJECTED'] }, paymentExpiresAt: { lte: now } },
+      select: { id: true }, orderBy: scoped ? { id: 'asc' } : { paymentExpiresAt: 'asc' }, take: 100,
     })
-  }
+    for (const candidate of candidates) {
+      expired += await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findUnique({ where: { id: candidate.id }, include: { items: true } })
+        if (!order || order.status !== 'PENDING' || order.verified ||
+            !['AWAITING_RECEIPT', 'REJECTED'].includes(order.paymentStatus) ||
+            !order.paymentExpiresAt || order.paymentExpiresAt > now) return 0
+        const claimed = await tx.order.updateMany({
+          where: { id: order.id, status: 'PENDING', verified: false, paymentStatus: order.paymentStatus,
+            updatedAt: order.updatedAt, paymentExpiresAt: { lte: now } },
+          data: { status: 'CANCELLED', paymentStatus: 'EXPIRED', paymentExpiresAt: null, updatedAt: nextOrderVersion(order.updatedAt) },
+        })
+        if (claimed.count !== 1) return 0
+        for (const [productId, quantity] of paymentQuantities(order.items)) {
+          await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
+        }
+        if (order.couponId) await releaseCouponReservation(tx, order.id, now)
+        return 1
+      })
+    }
+    // Keyset pagination advances past raced candidates too, so a failed claim
+    // cannot loop forever. Ordinary global/background sweeps stay capped at 100.
+    if (!scoped || candidates.length < 100) break
+    cursor = candidates[candidates.length - 1].id
+  } while (true)
   return expired
 }
 
@@ -122,6 +139,7 @@ export async function cancelUnpaidOrder(orderId: string, userId: string) {
     for (const [productId, quantity] of paymentQuantities(order.items)) {
       await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
     }
+    if (order.couponId) await releaseCouponReservation(tx, order.id, new Date())
     return cancellationDetails({ ...order, status: 'CANCELLED', paymentStatus: 'UNPAID', paymentExpiresAt: null, updatedAt })
   })
 }

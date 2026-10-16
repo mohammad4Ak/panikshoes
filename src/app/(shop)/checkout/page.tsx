@@ -9,10 +9,12 @@ import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/cart'
 import { formatPrice } from '@/lib/utils'
 import { calculateShippingCost, type ShippingMethodOption } from '@/lib/shipping'
+import { isCheckoutQuote, type CheckoutQuote } from '@/lib/checkout-quote-contract'
 import { useAppSession } from '@/components/auth/SessionActivityProvider'
 import { Star, Plus, ShoppingBag, ArrowLeft, ChevronLeft, MapPin, ClipboardCheck } from 'lucide-react'
 import styles from '@/components/shop/commerce.module.css'
 import shippingStyles from '@/components/shop/shipping.module.css'
+import couponStyles from './coupon.module.css'
 
 interface SavedAddress {
   id: string
@@ -37,11 +39,10 @@ function shippingQuote(method: ShippingMethodOption, subtotal: number, itemCount
 }
 
 export default function CheckoutPage() {
-  const { items, getTotal, clearCart, syncPrices, beginCheckout } = useCart()
+  const { items, clearCart, syncPrices, beginCheckout, checkoutAttempt } = useCart()
   const submitting = useRef(false)
   const addressEdited = useRef(false)
   const errorRef = useRef<HTMLDivElement>(null)
-  const subtotal = getTotal()
   const itemCount = items.reduce((count, item) => count + item.quantity, 0)
   const router = useRouter()
   const { session } = useAppSession()
@@ -58,6 +59,8 @@ export default function CheckoutPage() {
   const [error, setError] = useState('')
   const [stockUnavailable, setStockUnavailable] = useState(false)
   const [existingOrderId, setExistingOrderId] = useState('')
+  const [existingOrderOwner, setExistingOrderOwner] = useState<string | null>(null)
+  const ownedExistingOrderId = existingOrderOwner === userId ? existingOrderId : ''
   const [shippingMethods, setShippingMethods] = useState<ShippingMethodOption[]>([])
   const [selectedShippingId, setSelectedShippingId] = useState('')
   const [shippingLoading, setShippingLoading] = useState(true)
@@ -66,11 +69,87 @@ export default function CheckoutPage() {
   const [selectedPaymentId, setSelectedPaymentId] = useState('')
   const [paymentLoading, setPaymentLoading] = useState(true)
   const [paymentError, setPaymentError] = useState('')
+  const [couponDraft, setCouponDraft] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState('')
+  const [quoteReload, setQuoteReload] = useState(0)
+  const [quoteState, setQuoteState] = useState<{ key: string; quote: CheckoutQuote | null; error: string; loading: boolean }>({ key: '', quote: null, error: '', loading: false })
 
   const selectedShipping = shippingMethods.find((method) => method.id === selectedShippingId)
   const selectedPayment = paymentMethods.find((method) => method.id === selectedPaymentId)
-  const shippingCost = selectedShipping ? shippingQuote(selectedShipping, subtotal, itemCount) : null
-  const total = subtotal + (shippingCost ?? 0)
+  const quoteKey = JSON.stringify([userId, selectedShippingId, appliedCoupon, checkoutAttempt?.key ?? null, items.map(item => [item.productId, item.quantity, item.size, item.color, item.price, item.originalPrice ?? item.price])])
+  const quoteRequest = useRef(0)
+  const quote = quoteState.key === quoteKey && !quoteState.loading && !quoteState.error ? quoteState.quote : null
+  const quoteReady = quote !== null && !shippingLoading && !shippingError && !!selectedShipping
+  const quoteError = quoteState.key === quoteKey ? quoteState.error : ''
+  const quoteBusy = !!selectedShipping && !shippingError && (!quote || quoteState.loading) && !quoteError
+  const shippingCost = quoteReady ? quote.shippingCost : null
+  const netGoods = quoteReady ? quote.subtotal - quote.couponDiscount : null
+
+  useEffect(() => {
+    const requestId = ++quoteRequest.current
+    if (!items.length || !selectedShippingId || shippingLoading || shippingError || loading) return
+    const controller = new AbortController()
+    let timedOut = false
+    const current = () => quoteRequest.current === requestId && !controller.signal.aborted
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      if (quoteRequest.current === requestId) setQuoteState({ key: quoteKey, quote: null, loading: false, error: 'محاسبهٔ مبلغ بیش از حد طول کشید. دوباره تلاش کن.' })
+    }, 20_000)
+    const cartItems = items.map(item => ({ productId: item.productId, quantity: item.quantity }))
+    void fetch('/api/checkout/quote', {
+      method: 'POST', cache: 'no-store', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: cartItems, shippingMethodId: selectedShippingId, couponCode: appliedCoupon || null, ...(checkoutAttempt?.key ? { checkoutKey: checkoutAttempt.key } : {}) }),
+    }).then(async response => {
+      const data: unknown = await response.json().catch(() => null)
+      if (!response.ok) {
+        const message = data && typeof data === 'object' && 'error' in data && typeof data.error === 'string' ? data.error : 'محاسبهٔ مبلغ سفارش انجام نشد. دوباره تلاش کن.'
+        if (current() && data && typeof data === 'object' && 'code' in data && data.code === 'CHECKOUT_ALREADY_CREATED' && 'existingOrderId' in data && typeof data.existingOrderId === 'string') {
+          setExistingOrderId(data.existingOrderId)
+          setExistingOrderOwner(userId)
+          setError(message)
+        }
+        throw new Error(message)
+      }
+      if (!isCheckoutQuote(data)) throw new Error('پاسخ محاسبهٔ مبلغ معتبر نیست. دوباره تلاش کن.')
+      const prices = new Map(data.productPrices.map(price => [price.productId, price]))
+      const expectedIds = new Set(cartItems.map(item => item.productId))
+      if (prices.size !== expectedIds.size || data.productPrices.length !== prices.size || [...expectedIds].some(id => !prices.has(id)) ||
+          cartItems.reduce((sum, item) => sum + prices.get(item.productId)!.price * item.quantity, 0) !== data.subtotal ||
+          cartItems.reduce((sum, item) => sum + prices.get(item.productId)!.originalPrice * item.quantity, 0) !== data.grossSubtotal ||
+          (data.couponCode ?? '') !== appliedCoupon) throw new Error('پاسخ محاسبهٔ مبلغ با سبد خرید مطابقت ندارد. دوباره تلاش کن.')
+      if (!current()) return
+      syncPrices(data.productPrices)
+      setQuoteState({ key: quoteKey, quote: data, error: '', loading: false })
+    }).catch(cause => {
+      if (!current() || timedOut) return
+      setQuoteState({ key: quoteKey, quote: null, loading: false, error: cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'ارتباط با سرور برای محاسبهٔ مبلغ برقرار نشد. دوباره تلاش کن.' })
+    }).finally(() => clearTimeout(timer))
+    return () => { clearTimeout(timer); controller.abort() }
+    // The serialized key captures the complete basket and selected user/method.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteKey, quoteReload, shippingLoading, shippingError, loading, syncPrices])
+
+  const applyCoupon = () => {
+    if (loading || quoteBusy || !selectedShipping) return
+    const code = couponDraft.trim().toUpperCase()
+    if (!code) return
+    setAppliedCoupon(code)
+    setCouponDraft(code)
+    if (!ownedExistingOrderId) setError('')
+    setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true }))
+    setQuoteReload(previous => previous + 1)
+  }
+
+  const removeCoupon = () => {
+    if (loading) return
+    setAppliedCoupon('')
+    setCouponDraft('')
+    if (!ownedExistingOrderId) setError('')
+    setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true }))
+    setQuoteReload(previous => previous + 1)
+  }
 
   useEffect(() => {
     if (error) errorRef.current?.focus()
@@ -194,12 +273,16 @@ export default function CheckoutPage() {
     e.preventDefault()
     if (submitting.current) return
     setStockUnavailable(false)
-    if (loading || shippingLoading || shippingError || !selectedShipping || shippingCost === null) {
+    if (loading || shippingLoading || shippingError || !selectedShipping) {
       setError('برای ثبت سفارش، یک روش ارسال در دسترس انتخاب کن.')
       return
     }
     if (paymentLoading || paymentError || !selectedPayment) {
       setError('برای ثبت سفارش، یک روش پرداخت در دسترس انتخاب کن.')
+      return
+    }
+    if (!quoteReady) {
+      setError(quoteError || 'صبر کن تا مبلغ نهایی سفارش محاسبه شود؛ سپس دوباره ثبت سفارش را بزن.')
       return
     }
     setLoading(true)
@@ -214,8 +297,10 @@ export default function CheckoutPage() {
         phone: formData.phone.trim(),
         shippingMethodId: selectedShipping.id,
         paymentMethodId: selectedPayment.id,
-        expectedShippingCost: shippingCost,
-        expectedSubtotal: subtotal,
+        expectedShippingCost: quote.shippingCost,
+        expectedSubtotal: quote.subtotal,
+        expectedCouponDiscount: quote.couponDiscount,
+        couponCode: quote.couponCode,
         items: items.map((item) => ({ productId: item.productId, quantity: item.quantity, size: item.size, color: item.color })),
       }
       const checkoutKey = await beginCheckout()
@@ -234,8 +319,15 @@ export default function CheckoutPage() {
       }
 
       if (!res.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('COUPON_')) {
+          setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true }))
+          setQuoteReload(previous => previous + 1)
+          setError(data.error || 'کد تخفیف تغییر کرده است. مبلغ جدید را بررسی کن.')
+          return
+        }
         if (res.status === 409 && data.code === 'CHECKOUT_KEY_REUSED' && typeof data.existingOrderId === 'string') {
           setExistingOrderId(data.existingOrderId)
+          setExistingOrderOwner(userId)
           setError('این سبد قبلاً با اطلاعات دیگری ثبت شده است. ابتدا سفارش ثبت‌شده را بررسی کن؛ سفارش تکراری ساخته نشد.')
           return
         }
@@ -246,9 +338,11 @@ export default function CheckoutPage() {
           return
         }
         if (res.status === 409 && ['SHIPPING_METHOD_UNAVAILABLE', 'SHIPPING_QUOTE_CHANGED', 'ORDER_PRICES_CHANGED'].includes(data.code)) {
+          setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true }))
           if (Array.isArray(data.productPrices)) syncPrices(data.productPrices)
           setShippingLoading(true)
           await loadShippingMethods()
+          setQuoteReload(previous => previous + 1)
           setError(data.error || 'روش یا هزینهٔ ارسال تغییر کرده است. انتخاب و مبلغ جدید را بررسی کن و دوباره سفارش را ثبت کن.')
           setLoading(false)
           return
@@ -336,17 +430,32 @@ export default function CheckoutPage() {
             {items.map((item) => (
               <div key={`${item.productId}-${item.size}-${item.color}`} className={styles.orderLine}>
                 <div className={styles.orderLineImage}>{item.image ? <Image src={item.image} alt={item.name} fill sizes="65px" unoptimized={item.image.startsWith('http')} /> : <span className={styles.placeholder}><SneakerIcon /></span>}</div>
-                <div><h3>{item.name}</h3><p>{formatPrice(item.quantity)} عدد · سایز {formatPrice(item.size)} · {item.color}</p><p>{formatPrice(item.price * item.quantity)} تومان</p></div>
+                <div><h3>{item.name}</h3><p>{formatPrice(item.quantity)} عدد · سایز {formatPrice(item.size)} · {item.color}</p><p>{quoteReady ? `${formatPrice(quote.productPrices.find(price => price.productId === item.productId)!.price * item.quantity)} تومان` : '—'}</p></div>
               </div>
             ))}
           </div>
-          <div className={`${styles.summaryRow} mt-5`}><span>مجموع محصولات</span><strong>{formatPrice(subtotal)} تومان</strong></div>
+          <section className={couponStyles.coupon} aria-labelledby="checkout-coupon-label">
+            <label id="checkout-coupon-label" htmlFor="checkout-coupon">کد تخفیف داری؟</label>
+            <div className={couponStyles.inputRow}>
+              <input id="checkout-coupon" type="text" dir="ltr" autoComplete="off" autoCapitalize="characters" maxLength={32} placeholder="مثلاً PANIK10" value={couponDraft} disabled={loading} aria-describedby="checkout-coupon-hint" onChange={event => setCouponDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); applyCoupon() } }} />
+              <button type="button" disabled={loading || quoteBusy || !couponDraft.trim() || !selectedShipping} onClick={applyCoupon}>اعمال کد</button>
+            </div>
+            <p id="checkout-coupon-hint" className={couponStyles.hint}>در هر سفارش یک کد؛ روی مبلغ محصولات بعد از تخفیف مستقیم اعمال می‌شود.</p>
+            {!isLoggedIn && <Link href="/login?callbackUrl=%2Fcheckout" className={couponStyles.login}>برای استفاده از کد تخفیف وارد حساب شو</Link>}
+            {appliedCoupon && <div className={couponStyles.applied}><span dir="ltr">{appliedCoupon}</span><span>{quoteReady && quote.couponCode ? 'اعمال شد' : quoteError ? 'اعمال نشده' : 'در حال بررسی…'}</span><button type="button" disabled={loading} onClick={removeCoupon}>حذف کد</button></div>}
+          </section>
+          {quoteBusy && <p className={couponStyles.state} role="status">در حال محاسبهٔ مبلغ نهایی…</p>}
+          {quoteError && <div className={couponStyles.quoteError} role="alert"><p>{quoteError}</p><button type="button" disabled={loading} onClick={() => { setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true })); setQuoteReload(previous => previous + 1) }}>محاسبهٔ دوباره</button></div>}
+          <div className={`${styles.summaryRow} mt-5`}><span>قیمت اصلی محصولات</span><strong>{quoteReady ? `${formatPrice(quote.grossSubtotal)} تومان` : '—'}</strong></div>
+          {quoteReady && quote.productDiscount > 0 && <div className={`${styles.summaryRow} ${styles.savings}`}><span>تخفیف محصولات</span><strong>{formatPrice(quote.productDiscount)} تومان</strong></div>}
+          {quoteReady && quote.couponDiscount > 0 && <div className={`${styles.summaryRow} ${styles.savings}`}><span>تخفیف کد</span><strong>{formatPrice(quote.couponDiscount)} تومان</strong></div>}
+          <div className={styles.summaryRow}><span>مجموع محصولات</span><strong>{quoteReady ? `${formatPrice(quote.subtotal - quote.couponDiscount)} تومان` : '—'}</strong></div>
           <div className={styles.summaryRow}><span>روش ارسال</span><strong>{shippingLoading ? 'در حال بارگذاری…' : selectedShipping?.name ?? 'انتخاب نشده'}</strong></div>
           <div className={styles.summaryRow}><span>روش پرداخت</span><strong>{paymentLoading ? 'در حال بارگذاری…' : selectedPayment?.name ?? 'انتخاب نشده'}</strong></div>
           <div className={styles.summaryRow}><span>هزینهٔ ارسال</span><strong>{shippingLoading || shippingError || shippingCost === null ? '—' : shippingCost === 0 ? 'رایگان' : `${formatPrice(shippingCost)} تومان`}</strong></div>
           <div className={styles.summaryTotal}>
             <span>مجموع سفارش</span>
-            <span className={styles.price} aria-live="polite">{shippingLoading || shippingError || shippingCost === null ? '—' : <>{formatPrice(total)} <small>تومان</small></>}</span>
+            <span className={styles.price} aria-live="polite">{!quoteReady ? '—' : <>{formatPrice(quote.total)} <small>تومان</small></>}</span>
           </div>
           <Link href="/cart" className="text-brand text-xs">بازبینی سبد خرید <ArrowLeft size={15} /></Link>
         </aside>
@@ -363,7 +472,7 @@ export default function CheckoutPage() {
                   <Link href="/products" className="underline font-bold">دیدن محصولات دیگر</Link>
                 </div>
               )}
-              {existingOrderId && <Link href={`/payment/result?orderId=${encodeURIComponent(existingOrderId)}`} onClick={clearCart} className="underline font-bold">مشاهدهٔ سفارش ثبت‌شده</Link>}
+              {ownedExistingOrderId && <Link href={`/payment/result?orderId=${encodeURIComponent(ownedExistingOrderId)}`} onClick={clearCart} className="underline font-bold">مشاهدهٔ سفارش ثبت‌شده</Link>}
               {error.includes('وارد') && (
                 <Link href="/login" className="underline font-bold">
                   ورود به حساب
@@ -506,12 +615,12 @@ export default function CheckoutPage() {
             ) : (
               <div className={shippingStyles.choices}>
                 {shippingMethods.map((method) => {
-                  const cost = shippingQuote(method, subtotal, itemCount)
+                  const cost = netGoods === null ? null : shippingQuote(method, netGoods, itemCount)
                   return (
                     <label key={method.id} className={`${shippingStyles.choice} ${selectedShippingId === method.id ? shippingStyles.selected : ''}`}>
-                      <input type="radio" name="shipping-method" value={method.id} required disabled={cost === null} checked={selectedShippingId === method.id} onChange={() => setSelectedShippingId(method.id)} />
+                      <input type="radio" name="shipping-method" value={method.id} required disabled={netGoods !== null && cost === null} checked={selectedShippingId === method.id} onChange={() => setSelectedShippingId(method.id)} />
                       <span className={shippingStyles.copy}><strong>{method.name}</strong>{method.description && <span>{method.description}</span>}{method.freeShippingThreshold !== null && method.freeShippingThreshold > 0 && <small>ارسال رایگان برای خرید از {formatPrice(method.freeShippingThreshold)} تومان</small>}</span>
-                      <span className={shippingStyles.cost}>{cost === null ? 'قابل محاسبه نیست' : cost === 0 ? 'رایگان' : <>{formatPrice(cost)} <small>تومان</small></>}</span>
+                      <span className={shippingStyles.cost}>{netGoods === null ? '—' : cost === null ? 'قابل محاسبه نیست' : cost === 0 ? 'رایگان' : <>{formatPrice(cost)} <small>تومان</small></>}</span>
                     </label>
                   )
                 })}
@@ -547,7 +656,7 @@ export default function CheckoutPage() {
 
           <button
             type="submit"
-            disabled={loading || shippingLoading || Boolean(shippingError) || !selectedShipping || shippingCost === null || paymentLoading || Boolean(paymentError) || !selectedPayment}
+            disabled={loading || !quoteReady || paymentLoading || Boolean(paymentError) || !selectedPayment}
             className="btn-primary w-full text-sm py-4 disabled:opacity-50"
           >
             {loading ? 'در حال ثبت سفارش...' : 'ثبت سفارش و ادامهٔ پرداخت'}

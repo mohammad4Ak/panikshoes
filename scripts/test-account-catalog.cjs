@@ -12,6 +12,7 @@ const context = (id = 'target') => ({ params: Promise.resolve({ id }) })
 const request = (body) => new Request('http://localhost/api', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
+const pricingSnapshot = row => ({ price: row.price, salePrice: row.salePrice ?? null, saleStartsAt: row.saleStartsAt ?? null, saleEndsAt: row.saleEndsAt ?? null })
 
 // Execute the real modules against isolated auth/database/filesystem doubles.
 // No account, order, image upload, or database row is changed by this suite.
@@ -351,7 +352,7 @@ test('Stocked products require a size using merged existing and updated values',
     { existing: { stock: 5, sizes: [41] }, body: { sizes: [] }, expected: 400 },
     { existing: { stock: 0, sizes: [] }, body: { stock: 2, expectedStock: 0 }, expected: 400 },
     { existing: { stock: 0, sizes: [] }, body: { stock: 2, sizes: [42], expectedStock: 0 }, expected: 200 },
-    { existing: { stock: 5, sizes: [41] }, body: { price: 200 }, expected: 200 },
+    { existing: { stock: 5, sizes: [41], price: 100 }, body: { price: 200, expectedPricing: pricingSnapshot({ price: 100 }) }, expected: 200 },
   ]) {
     let updates = 0
     const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
@@ -361,6 +362,89 @@ test('Stocked products require a size using merged existing and updated values',
     assert.equal((await handlers.PUT(request(scenario.body), context())).status, scenario.expected)
     assert.equal(updates, scenario.expected === 200 ? 1 : 0)
   }
+})
+
+test('Product sale creation rejects invalid money and calendar schedules before writing', async () => {
+  for (const sale of [
+    { salePrice: 0 }, { salePrice: 100 }, { salePrice: 101 }, { salePrice: 1.5 },
+    { salePrice: 80, saleStartsAt: 'not-a-date' },
+    { salePrice: 80, saleStartsAt: '2026-10-15T10:00' },
+    { salePrice: 80, saleStartsAt: '2026-02-30T10:00:00Z' },
+    { salePrice: 80, saleStartsAt: '2026-10-15T10:00:00Z', saleEndsAt: '2026-10-15T09:00:00Z' },
+    { salePrice: 80, saleStartsAt: '2026-10-15T10:00:00Z', saleEndsAt: '2026-10-15T10:00:00Z' },
+    { saleStartsAt: '2026-10-15T10:00:00Z' },
+  ]) {
+    const { handlers } = load('src/app/api/products/route.ts')
+    assert.equal((await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'cat', ...sale }))).status, 400, JSON.stringify(sale))
+  }
+})
+
+test('Partial price and schedule edits validate against the current product sale; clearing removes its schedule', async () => {
+  const row = { id: 'target', price: 100, salePrice: 80, saleStartsAt: new Date('2026-10-15T10:00:00Z'), saleEndsAt: new Date('2026-10-15T12:00:00Z'), sizes: [], stock: 0 }
+  const writes = []
+  const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
+    findUnique: async () => ({ ...row }),
+    update: async ({ data, where }) => { writes.push({ data, where }); return Object.assign(row, data) },
+  } } })
+  for (const changes of [{ price: 70 }, { salePrice: 100 }, { saleStartsAt: '2026-10-15T13:00:00Z' }, { saleEndsAt: '2026-10-15T09:00:00Z' }]) {
+    assert.equal((await handlers.PUT(request({ ...changes, expectedPricing: pricingSnapshot(row) }), context())).status, 400, JSON.stringify(changes))
+  }
+  assert.equal(writes.length, 0)
+  assert.equal((await handlers.PUT(request({ salePrice: 75, expectedPricing: pricingSnapshot(row) }), context())).status, 200)
+  assert.equal(row.price, 100)
+  assert.equal(row.salePrice, 75)
+  assert.equal(writes[0].where.salePrice, 80, 'The merge is protected against concurrent pricing edits')
+  assert.equal((await handlers.PUT(request({ salePrice: null, price: 70, expectedPricing: pricingSnapshot(row) }), context())).status, 200)
+  assert.equal(row.salePrice, null)
+  assert.equal(row.saleStartsAt, null)
+  assert.equal(row.saleEndsAt, null)
+  assert.equal(row.price, 70)
+})
+
+test('A concurrent pricing edit cannot write a discount validated against an obsolete base price', async () => {
+  let writes = 0
+  const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
+    findUnique: async () => ({ id: 'target', price: 100, salePrice: null, saleStartsAt: null, saleEndsAt: null, sizes: [], stock: 0 }),
+    update: async ({ where }) => { assert.equal(where.price, 100); writes++; throw { code: 'P2025' } },
+  } } })
+  const response = await handlers.PUT(request({ salePrice: 80, expectedPricing: pricingSnapshot({ price: 100 }) }), context())
+  assert.equal(response.status, 409)
+  assert.equal((await response.json()).code, 'PRODUCT_PRICE_CHANGED')
+  assert.equal(writes, 1)
+})
+
+test('A stale admin pricing snapshot cannot overwrite a sale changed before saving the form', async () => {
+  const row = { id: 'target', price: 100, salePrice: 70, saleStartsAt: new Date('2026-10-15T10:00:32Z'), saleEndsAt: null, stock: 0, sizes: [] }
+  let writes = 0
+  const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
+    findUnique: async () => ({ ...row }), update: async ({ data }) => { writes++; return Object.assign(row, data) },
+  } } })
+  for (const stale of [
+    { ...pricingSnapshot(row), salePrice: 80 },
+    { ...pricingSnapshot(row), price: 110 },
+    { ...pricingSnapshot(row), saleStartsAt: '2026-10-15T10:00:00Z' },
+    { ...pricingSnapshot(row), saleEndsAt: '2026-10-16T10:00:00Z' },
+  ]) {
+    const result = await handlers.PUT(request({ description: 'New description', salePrice: 60, expectedPricing: stale }), context())
+    assert.equal(result.status, 409)
+    assert.equal((await result.json()).code, 'PRODUCT_PRICE_CHANGED')
+  }
+  assert.equal(writes, 0)
+  assert.equal(row.salePrice, 70)
+  assert.equal((await handlers.PUT(request({ description: 'Metadata only' }), context())).status, 200)
+  assert.equal(row.salePrice, 70)
+  assert.equal(row.description, 'Metadata only')
+})
+
+test('Pricing writes require a complete valid original snapshot', async () => {
+  let writes = 0
+  const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
+    findUnique: async () => ({ price: 100, stock: 0, sizes: [] }), update: async () => { writes++; return {} },
+  } } })
+  for (const expectedPricing of [undefined, null, [], {}, { price: 100 }, { ...pricingSnapshot({ price: 100 }), salePrice: -1 }, { ...pricingSnapshot({ price: 100 }), saleEndsAt: 'not-a-date' }]) {
+    assert.equal((await handlers.PUT(request({ salePrice: 80, expectedPricing }), context())).status, 400)
+  }
+  assert.equal(writes, 0)
 })
 
 test('Stale admin inventory edits never restore stock consumed by a checkout', async () => {

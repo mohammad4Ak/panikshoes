@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChartNoAxesCombined,
   MessageSquareText,
+  TicketPercent,
 } from 'lucide-react'
 import { signOutWithSessionLock as signOut } from '@/lib/session-actions'
 import styles from './admin.module.css'
@@ -30,6 +31,7 @@ const adminNav = [
   { href: '/admin/analytics', label: 'آمار بازدید', Icon: ChartNoAxesCombined },
   { href: '/admin/reviews', label: 'نظرات و امتیازها', Icon: MessageSquareText },
   { href: '/admin/products', label: 'محصولات', Icon: Package },
+  { href: '/admin/coupons', label: 'کدهای تخفیف', Icon: TicketPercent },
   { href: '/admin/categories', label: 'دسته‌بندی‌ها', Icon: Tags },
   { href: '/admin/orders', label: 'سفارش‌ها', Icon: ShoppingBag },
   { href: '/admin/payments', label: 'بررسی پرداخت‌ها', Icon: ReceiptText },

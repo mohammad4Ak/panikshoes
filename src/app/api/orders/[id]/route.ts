@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth'
 import { buildInvoiceSnapshot, isInvoiceEligibleStatus } from '@/lib/invoice'
 import { isSameOriginRequest } from '@/lib/request-origin'
 import { readSiteSettings } from '@/lib/site-settings'
+import { CouponError, reacquireCouponReservation, releaseCouponReservation } from '@/lib/coupons'
 
 const validStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const
 type OrderStatus = typeof validStatuses[number]
@@ -93,6 +94,7 @@ export async function PATCH(
         for (const [productId, quantity] of quantities(existing.items)) {
           await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
         }
+        if (existing.couponId && !existing.verified) await releaseCouponReservation(tx, id, new Date())
       } else if (existing.status === 'CANCELLED') {
         for (const [productId, quantity] of quantities(existing.items)) {
           const decremented = await tx.product.updateMany({
@@ -104,6 +106,7 @@ export async function PATCH(
             throw new StatusError(`موجودی «${product?.name ?? 'محصول'}» برای بازگشایی سفارش کافی نیست`)
           }
         }
+        if (existing.couponId && !existing.verified) await reacquireCouponReservation(tx, id, existing.userId, new Date())
       }
 
       // The order row was claimed before issuance. Concurrent approvals cannot
@@ -121,6 +124,7 @@ export async function PATCH(
     return NextResponse.json(order)
   } catch (error) {
     if (error instanceof StatusError) return NextResponse.json({ error: error.message }, { status: error.status })
+    if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return NextResponse.json({ error: 'خطا در تغییر وضعیت' }, { status: 500 })
   }
 }
@@ -160,6 +164,7 @@ export async function DELETE(
         }
       }
 
+      if (order.couponId) await releaseCouponReservation(tx, id, new Date())
       await tx.orderItem.deleteMany({ where: { orderId: id } })
       await tx.order.delete({ where: { id } })
     })
@@ -167,6 +172,7 @@ export async function DELETE(
     return NextResponse.json({ success: true })
   } catch (error) {
     if (error instanceof StatusError) return NextResponse.json({ error: error.message }, { status: error.status })
+    if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return NextResponse.json({ error: 'خطا در حذف سفارش' }, { status: 500 })
   }
 }

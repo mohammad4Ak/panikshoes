@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Check, Copy, RefreshCw, Upload, X } from 'lucide-react'
 import { PaymentStatusIcon } from '@/components/ui/BrandIcons'
 import { formatPrice } from '@/lib/utils'
+import { getOrderTotals } from '@/lib/order-totals'
 import type { InvoiceMetadata } from '@/lib/invoice'
 import { MAX_RECEIPT_BYTES, normalizePaymentDigits, paymentStatusLabels, type PaymentStatus } from '@/lib/payment-contract'
 import InvoiceDownload from './InvoiceDownload'
@@ -27,6 +28,11 @@ interface PaymentData {
   order: {
     id: string
     total: number
+    subtotal?: number | null
+    productDiscount?: number
+    couponDiscount?: number
+    couponCode?: string | null
+    shippingCost?: number
     status: string
     verified: boolean
     paymentMethod: string | null
@@ -48,6 +54,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 const isNullableString = (value: unknown) => value === null || typeof value === 'string'
 const isTimestamp = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value))
 const isPaymentStatus = (value: unknown): value is PaymentStatus => typeof value === 'string' && Object.hasOwn(paymentStatusLabels, value)
+const isOptionalAmount = (value: unknown) => value === undefined || (Number.isSafeInteger(value) && Number(value) >= 0)
 const isReceipt = (value: unknown): value is Receipt => isRecord(value)
   && typeof value.id === 'string' && value.id.length > 0 && isTimestamp(value.createdAt)
   && typeof value.status === 'string' && Object.hasOwn(receiptLabels, value.status)
@@ -60,6 +67,9 @@ function isPaymentData(value: unknown, orderId: string): value is PaymentData {
   const invoice = order.invoice
   const needsDeadline = !order.verified && order.status === 'PENDING' && (order.paymentStatus === 'AWAITING_RECEIPT' || order.paymentStatus === 'REJECTED')
   return order.id === orderId && typeof order.total === 'number' && Number.isFinite(order.total) && order.total >= 0
+    && (order.subtotal == null || isOptionalAmount(order.subtotal)) && isOptionalAmount(order.productDiscount)
+    && isOptionalAmount(order.couponDiscount) && isOptionalAmount(order.shippingCost)
+    && (order.couponCode === undefined || isNullableString(order.couponCode))
     && typeof order.status === 'string' && typeof order.verified === 'boolean' && isNullableString(order.paymentMethod)
     && isPaymentStatus(order.paymentStatus) && (order.paymentExpiresAt === null || isTimestamp(order.paymentExpiresAt))
     && (!needsDeadline || isTimestamp(order.paymentExpiresAt))
@@ -368,6 +378,7 @@ export default function BankTransferPayment({ orderId }: { orderId: string }) {
           : 'مبلغ دقیق سفارش را به کارت زیر واریز کن و پیش از پایان مهلت، تصویر رسید را همین‌جا بفرست.'
   const minutes = Math.floor(secondsLeft / 60)
   const seconds = secondsLeft % 60
+  const totals = getOrderTotals(data.order)
 
   return (
     <div className={styles.page}>
@@ -386,6 +397,12 @@ export default function BankTransferPayment({ orderId }: { orderId: string }) {
           <aside className={styles.summary} aria-label="جزئیات پرداخت سفارش">
             <div className={styles.sectionTop}><span>جزئیات واریز</span><bdi>#{data.order.id.slice(-8)}</bdi></div>
             <div className={styles.amount}><span>مبلغ دقیق سفارش</span><strong>{formatPrice(data.order.total)} <small>تومان</small></strong><p>{formatPrice(data.order.total * 10)} ریال</p>{active && <button type="button" onClick={() => void copy(String(data.order.total * 10), 'مبلغ ریالی')}>{copied === 'مبلغ ریالی' ? <Check size={14} /> : <Copy size={14} />}کپی مبلغ به ریال</button>}</div>
+            {totals.discount > 0 && <div className="space-y-2 text-sm py-4 border-b border-line" aria-label="محاسبهٔ مبلغ سفارش">
+              <p className="flex justify-between gap-3"><span>جمع اولیهٔ کالاها</span><span>{formatPrice(totals.subtotal)} تومان</span></p>
+              {totals.productDiscount > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف محصولات</span><span>−{formatPrice(totals.productDiscount)} تومان</span></p>}
+              {totals.couponDiscount > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف کد {totals.couponCode && <bdi>{totals.couponCode}</bdi>}</span><span>−{formatPrice(totals.couponDiscount)} تومان</span></p>}
+              <p className="flex justify-between gap-3"><span>هزینهٔ ارسال</span><span>{totals.shipping === 0 ? 'رایگان' : `${formatPrice(totals.shipping)} تومان`}</span></p>
+            </div>}
             <div className={styles.bankCard} aria-label="کارت مقصد واریز">
               <div className={styles.cardTop}><span>{data.order.paymentBankName || 'کارت بانکی مقصد'}</span><span className={styles.cardChip}><CardChip /></span></div>
               <div className={styles.cardNumber} dir="ltr">{cardGroups.length ? cardGroups.map((group, index) => <span key={index}>{group}</span>) : <span>شماره کارت ثبت نشده</span>}</div>

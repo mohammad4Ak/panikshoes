@@ -11,6 +11,8 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { formatPrice, toPersianDigits } from '@/lib/utils'
+import PersianDatePicker from '@/components/ui/PersianDatePicker'
+import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import type { SalesLedgerReport, SalesReport } from '@/lib/sales-report'
 import styles from './dashboard.module.css'
 
@@ -190,7 +192,10 @@ function Reconciliation({ report }: { report: SalesReport }) {
     <section className={styles.panel} aria-labelledby="reconciliation-heading">
       <div className={styles.panelHeading}><div><h2 id="reconciliation-heading">جمع‌بندی حساب فروش</h2><p>تفکیک مبلغ دریافت‌شده و سفارش‌های باز</p></div></div>
       <div className={styles.breakdown}>
-        <MoneyRow label="مبلغ کالای فروخته‌شده" value={summary.merchandise} />
+        <MoneyRow label="جمع اولیهٔ کالاهای فروخته‌شده" value={summary.grossMerchandise} />
+        <MoneyRow label="تخفیف محصولات" value={-summary.productDiscount} />
+        <MoneyRow label="تخفیف کدها" value={-summary.couponDiscount} />
+        <MoneyRow label="فروش خالص کالا" value={summary.merchandise} detail="پس از کسر تخفیف محصول و کد تخفیف" />
         <MoneyRow label="مبلغ ارسال دریافتی" value={summary.shipping} detail="مبلغی که مشتری بابت ارسال پرداخت کرده" />
         <MoneyRow label="مجموع فروش پرداخت‌شده" value={summary.receipts} total />
         <MoneyRow label="سفارش‌های پرداخت‌تأییدنشده" value={summary.unpaidAmount} detail={`${toPersianDigits(summary.unpaidOrders)} سفارش · در مبلغ فروش محاسبه نشده`} />
@@ -204,7 +209,7 @@ function Reconciliation({ report }: { report: SalesReport }) {
 function ProductSales({ report }: { report: SalesReport }) {
   return (
     <section className={styles.panel} aria-labelledby="product-sales-heading">
-      <div className={styles.panelHeading}><div><h2 id="product-sales-heading">محصولات پرفروش</h2><p>بر اساس اقلام سفارش‌های پرداخت‌شده و لغونشده</p></div><span className={styles.panelTag}>مبلغ کالا · تومان</span></div>
+      <div className={styles.panelHeading}><div><h2 id="product-sales-heading">محصولات پرفروش</h2><p>پرداخت‌شده و لغونشده · پس از کسر سهم دقیق تخفیف هر کالا</p></div><span className={styles.panelTag}>فروش خالص · تومان</span></div>
       {report.topProducts.length ? (
         <div className={styles.tableWrap}><table className={styles.table}>
           <thead><tr><th scope="col">محصول</th><th scope="col">تعداد جفت</th><th scope="col">مبلغ فروش</th></tr></thead>
@@ -348,10 +353,10 @@ export default function AdminDashboard() {
           ))}</div>
         </div>
         {customMode && <form className={styles.dateRow} onSubmit={applyCustom}>
-          <label className={styles.dateField}><span>از تاریخ</span><input type="date" value={draft.from} onChange={(event) => setDraft((previous) => ({ ...previous, from: event.target.value }))} required aria-describedby="date-picker-note" /></label>
-          <label className={styles.dateField}><span>تا تاریخ</span><input type="date" value={draft.to} onChange={(event) => setDraft((previous) => ({ ...previous, to: event.target.value }))} required aria-describedby="date-picker-note" /></label>
+          <div className={styles.dateField}><span><label htmlFor="sales-date-from">از تاریخ</label></span><PersianDatePicker id="sales-date-from" value={draft.from} max={draft.to || undefined} onChange={(value) => setDraft((previous) => ({ ...previous, from: value }))} required aria-describedby="date-picker-note" /></div>
+          <div className={styles.dateField}><span><label htmlFor="sales-date-to">تا تاریخ</label></span><PersianDatePicker id="sales-date-to" value={draft.to} min={draft.from || undefined} onChange={(value) => setDraft((previous) => ({ ...previous, to: value }))} required aria-describedby="date-picker-note" /></div>
           <button type="submit" className={styles.applyButton}>نمایش گزارش</button>
-          <p className={styles.rangeCaption} id="date-picker-note">تاریخ ورودی میلادی است؛ گزارش به تاریخ شمسی نمایش داده می‌شود.</p>
+          <p className={styles.rangeCaption} id="date-picker-note">تاریخ‌ها شمسی هستند؛ بازهٔ گزارش بر اساس ساعت تهران محاسبه می‌شود.</p>
         </form>}
         <div className={styles.dateRow}><p className={styles.rangeCaption} aria-live="polite">
           {data ? <><strong>{formatDate(data.range.from)} تا {formatDate(data.range.to)}</strong>مقایسه با {formatDate(data.previousRange.from)} تا {formatDate(data.previousRange.to)} · ساعت تهران</> : report.loading ? 'در حال دریافت بازهٔ گزارش…' : 'بازهٔ گزارش در دسترس نیست'}
@@ -369,19 +374,20 @@ export default function AdminDashboard() {
       <section className={`${styles.panel} ${styles.ledgerPanel}`} aria-labelledby="order-ledger-heading">
         <div className={`${styles.panelHeading} ${styles.ledgerHeader}`}><div><h2 id="order-ledger-heading">ریز حساب سفارش‌ها</h2><p>مبلغ کالا، ارسال و وضعیت پرداخت هر سفارش · همهٔ مبالغ به تومان</p></div></div>
         <div className={styles.ledgerTools}>
-          <label className={styles.ledgerFilter}><span>وضعیت پرداخت</span><select value={payment} onChange={(event) => { setPayment(event.target.value); setPage(1); setExportError('') }}>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <label className={styles.ledgerFilter}><span>وضعیت سفارش</span><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); setExportError('') }}><option value="all">همهٔ وضعیت‌ها</option>{Object.entries(statuses).map(([value, status]) => <option key={value} value={value}>{status.label}</option>)}</select></label>
+          <label className={styles.ledgerFilter}><span>وضعیت پرداخت</span><EnhancedSelect nativeAppearance value={payment} onChange={(event) => { setPayment(event.target.value); setPage(1); setExportError('') }}>{paymentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</EnhancedSelect></label>
+          <label className={styles.ledgerFilter}><span>وضعیت سفارش</span><EnhancedSelect nativeAppearance value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); setExportError('') }}><option value="all">همهٔ وضعیت‌ها</option>{Object.entries(statuses).map(([value, status]) => <option key={value} value={value}>{status.label}</option>)}</EnhancedSelect></label>
           <button className={styles.exportButton} onClick={exportCsv} disabled={exporting || !data || ledger.loading || !!ledger.error || !ledger.data?.pagination.total}><Download size={15} aria-hidden="true" />{exporting ? 'در حال دریافت…' : 'خروجی برای Excel · CSV'}</button>
         </div>
         <p className={styles.footnote}>فایل شامل همهٔ سفارش‌های مطابق بازه و فیلترهاست، تا سقف ۱۰٬۰۰۰ ردیف؛ فقط صفحهٔ جاری نیست.</p>
         {exportError && <p className={styles.filterError} role="alert">{exportError}</p>}
         {report.loading ? <p className={styles.loadingText} role="status">ابتدا بازهٔ گزارش آماده می‌شود…</p> : report.error ? <Empty title="ریز سفارش‌ها تا دریافت گزارش بازه در دسترس نیست">با تلاش دوباره برای گزارش، ریز سفارش‌ها نیز دریافت می‌شود.</Empty> : ledger.loading ? <p className={styles.loadingText} role="status">در حال دریافت ریز سفارش‌ها…</p> : ledger.error ? <ErrorPanel message={ledger.error} onRetry={() => setLedgerRevision((value) => value + 1)} /> : ledger.data?.orders.length ? <>
           <div className={styles.tableWrap}><table className={`${styles.table} ${styles.ledgerTable}`}>
-            <thead><tr><th scope="col">سفارش / مشتری</th><th scope="col">تاریخ ثبت</th><th scope="col">مبلغ کالا</th><th scope="col">ارسال</th><th scope="col">مجموع</th><th scope="col">پرداخت</th><th scope="col">وضعیت سفارش</th></tr></thead>
+            <thead><tr><th scope="col">سفارش / مشتری</th><th scope="col">تاریخ ثبت</th><th scope="col">فروش خالص کالا</th><th scope="col">تخفیف‌ها</th><th scope="col">ارسال</th><th scope="col">مجموع</th><th scope="col">پرداخت</th><th scope="col">وضعیت سفارش</th></tr></thead>
             <tbody>{ledger.data.orders.map((order) => <tr key={order.id}>
               <td><span className={styles.orderId} title={order.id}>#{order.id.slice(-8)}</span><span className={styles.customerName}>{order.customerName || 'بدون نام'}</span></td>
               <td className={styles.dateCell}>{formatDate(order.createdAt)}<br />{toPersianDigits(order.units)} جفت</td>
               <td className={styles.moneyCell}>{formatPrice(order.merchandise)}</td>
+              <td>{formatPrice(order.discounts)}<small className={styles.shippingCount} style={{ display: 'block' }}>محصول: {formatPrice(order.productDiscount)} · کد: {formatPrice(order.couponDiscount)}</small>{order.couponCode && <bdi className={styles.shippingCount} style={{ display: 'block' }}>{order.couponCode}</bdi>}</td>
               <td>{formatPrice(order.shipping)}<span className={styles.shippingCount} style={{ display: 'block' }}>{order.shippingMethodName || 'ثبت نشده'}</span></td>
               <td className={styles.moneyCell}>{formatPrice(order.total)}</td>
               <td><span className={`${styles.badge} ${order.status === 'CANCELLED' ? styles.cancelledBadge : order.verified ? styles.paidBadge : styles.unpaidBadge}`}>{paymentLabel(order.classification, order.verified)}</span></td>

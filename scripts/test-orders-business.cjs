@@ -19,6 +19,8 @@ function load(file, dependencies = {}) {
 }
 const shipping = load('src/lib/shipping.ts')
 const invoice = load('src/lib/invoice.ts')
+const pricing = load('src/lib/pricing.ts')
+const coupons = load('src/lib/coupons.ts')
 const clone = (value) => structuredClone(value)
 const method = { id: 'post', name: 'پست پیشتاز', baseCost: 50000, additionalItemCost: 10000, freeShippingThreshold: null, isActive: true }
 const product = { id: 'shoe', name: 'کفش', price: 100000, stock: 10, sizes: [42, 43], colors: ['سبز', 'مشکی'] }
@@ -89,6 +91,7 @@ function createHarness({ products = [product], selectedPaymentMethod = paymentMe
   const route = load('src/app/api/orders/route.ts', {
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true }, '@/lib/prisma': { prisma },
     '@/lib/auth': { auth: async () => session }, '@/lib/shipping': shipping,
+    '@/lib/pricing': pricing, '@/lib/coupons': coupons,
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
   return { post: (value) => route.POST(request(value)), committed, reads, mutations }
@@ -441,6 +444,7 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
   const route = load('src/app/api/orders/[id]/route.ts', {
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true }, '@/lib/prisma': { prisma }, '@/lib/auth': { auth: async () => session },
     '@/lib/invoice': invoice,
+    '@/lib/coupons': coupons,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName }) },
   })
   const params = { params: Promise.resolve({ id: 'order' }) }

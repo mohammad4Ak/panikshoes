@@ -42,6 +42,8 @@ interface OrderItem {
   size: number
   color: string
   price: number
+  originalPrice?: number | null
+  couponDiscount?: number
   productName?: string | null
   product: { name: string }
 }
@@ -49,6 +51,10 @@ interface OrderItem {
 interface Order {
   id: string
   total: number
+  subtotal?: number | null
+  productDiscount?: number
+  couponDiscount?: number
+  couponCode?: string | null
   shippingMethodName: string | null
   shippingCost: number
   status: string
@@ -426,10 +432,15 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
                           <span className="text-night">
                             {item.productName || item.product.name} — سایز {item.size} × {item.quantity}
                           </span>
-                          <span className="text-mist">{formatPrice(item.price * item.quantity)}</span>
+                          <span className="text-left">{item.originalPrice != null && item.originalPrice > item.price && <del className="block text-xs text-mist">{formatPrice(item.originalPrice * item.quantity)} تومان</del>}{formatPrice(item.price * item.quantity - (item.couponDiscount ?? 0))} تومان{(item.couponDiscount ?? 0) > 0 && <small className="block text-brand">سهم تخفیف کد: {formatPrice(item.couponDiscount!)} تومان</small>}</span>
                         </div>
                       ))}
                       <div className="text-sm pt-3 border-t border-line/60 space-y-2">
+                        {((order.productDiscount ?? 0) > 0 || (order.couponDiscount ?? 0) > 0) && <>
+                          <p className="flex justify-between gap-3"><span className="text-mist">جمع اولیهٔ کالاها</span><span>{formatPrice(order.subtotal ?? order.total - order.shippingCost + (order.productDiscount ?? 0) + (order.couponDiscount ?? 0))} تومان</span></p>
+                          {(order.productDiscount ?? 0) > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف محصولات</span><span>−{formatPrice(order.productDiscount!)} تومان</span></p>}
+                          {(order.couponDiscount ?? 0) > 0 && <p className="flex justify-between gap-3 text-brand"><span>تخفیف کد {order.couponCode && <bdi>{order.couponCode}</bdi>}</span><span>−{formatPrice(order.couponDiscount!)} تومان</span></p>}
+                        </>}
                         <p className="flex justify-between gap-3"><span className="text-mist">پرداخت</span><span>{order.verified ? 'تأییدشده' : paymentLabels[order.paymentStatus ?? ''] ?? 'هنوز تأیید نشده'}</span></p>
                         {order.paymentMethod === 'bank_transfer' && <p className="flex justify-between gap-3"><span className="text-mist">روش پرداخت</span><span>کارت‌به‌کارت / انتقال وجه</span></p>}
                         <p className="flex justify-between gap-3"><span className="text-mist">روش ارسال</span><span>{order.shippingMethodName || 'ثبت نشده'}</span></p>

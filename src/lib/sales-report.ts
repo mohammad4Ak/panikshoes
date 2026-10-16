@@ -48,11 +48,15 @@ export interface SalesOrder {
   id: string
   createdAt: Date
   total: number
+  subtotal?: number | null
+  productDiscount?: number
+  couponDiscount?: number
+  couponCode?: string | null
   shippingCost: number
   shippingMethodName: string | null
   status: SalesOrderStatus
   verified: boolean
-  items: { productId: string; quantity: number; price: number; product: { name: string } }[]
+  items: { productId: string; quantity: number; price: number; originalPrice?: number | null; couponDiscount?: number; product: { name: string } }[]
   user?: { name: string }
 }
 
@@ -60,6 +64,10 @@ export interface FinancialSummary {
   orders: number
   receipts: number
   merchandise: number
+  grossMerchandise: number
+  productDiscount: number
+  couponDiscount: number
+  discounts: number
   shipping: number
   paidOrders: number
   unitsSold: number
@@ -103,6 +111,11 @@ export interface SalesLedgerRow {
   verified: boolean
   classification: SalesPaymentClass
   merchandise: number
+  subtotal: number
+  productDiscount: number
+  couponDiscount: number
+  discounts: number
+  couponCode: string | null
   shipping: number
   total: number
   units: number
@@ -212,7 +225,7 @@ export function classifyPayment(order: Pick<SalesOrder, 'verified' | 'status'>):
 
 function summarize(orders: SalesOrder[]): FinancialSummary {
   const summary: FinancialSummary = {
-    orders: orders.length, receipts: 0, merchandise: 0, shipping: 0, paidOrders: 0, unitsSold: 0,
+    orders: orders.length, receipts: 0, merchandise: 0, grossMerchandise: 0, productDiscount: 0, couponDiscount: 0, discounts: 0, shipping: 0, paidOrders: 0, unitsSold: 0,
     averageOrderValue: 0, unpaidOrders: 0, unpaidAmount: 0, cancelledOrders: 0, cancelledAmount: 0,
     paidCancelledOrders: 0, paidCancelledAmount: 0,
   }
@@ -221,6 +234,10 @@ function summarize(orders: SalesOrder[]): FinancialSummary {
       case 'paid':
         summary.receipts += order.total
         summary.merchandise += order.total - order.shippingCost
+        summary.productDiscount += order.productDiscount ?? 0
+        summary.couponDiscount += order.couponDiscount ?? 0
+        summary.discounts += (order.productDiscount ?? 0) + (order.couponDiscount ?? 0)
+        summary.grossMerchandise += order.subtotal ?? order.total - order.shippingCost + (order.productDiscount ?? 0) + (order.couponDiscount ?? 0)
         summary.shipping += order.shippingCost
         summary.paidOrders++
         summary.unitsSold += order.items.reduce((sum, item) => sum + item.quantity, 0)
@@ -308,7 +325,7 @@ export function buildSalesReport(
     for (const item of order.items) {
       const product = products.get(item.productId) ?? { productId: item.productId, name: item.product.name, sold: 0, merchandise: 0 }
       product.sold += item.quantity
-      product.merchandise += item.quantity * item.price
+      product.merchandise += item.quantity * item.price - (item.couponDiscount ?? 0)
       products.set(item.productId, product)
     }
     const name = order.shippingMethodName?.trim() || 'روش ارسال ثبت نشده'
@@ -332,6 +349,7 @@ export function buildSalesReport(
     notes: [
       'همهٔ مبالغ تومان هستند. بازه بر اساس تاریخ ثبت سفارش و روز کاری تهران است؛ وضعیت پرداخت، وضعیت فعلی تأیید سفارش است و زمان واقعی دریافت وجه ثبت نشده است.',
       'دریافت سفارش، فروش کالا و ارسال دریافتی فقط سفارش‌های دارای پرداخت تأییدشده و لغونشده را شامل می‌شوند.',
+      'فروش کالا پس از کسر تخفیف محصول و کد تخفیف محاسبه می‌شود؛ مبلغ فروش هر محصول سهم دقیق تخفیف کد آن ردیف را نیز کسر می‌کند.',
       'پرداخت‌های تأییدشدهٔ سفارش‌های لغوشده جدا نمایش داده می‌شوند؛ وضعیت و مبلغ استرداد وجه در داده‌ها ثبت نشده است.',
       'ارسال دریافتی مبلغ گرفته‌شده از مشتری است؛ هزینهٔ واقعی شرکت حمل، بهای خرید کالا و سود در این گزارش محاسبه نمی‌شوند.',
     ],
@@ -373,6 +391,9 @@ export function buildSalesLedgerRow(order: SalesOrder): SalesLedgerRow {
     id: order.id, createdAt: order.createdAt.toISOString(), customerName: order.user?.name ?? 'نام ثبت نشده',
     status: order.status, verified: order.verified, classification: classifyPayment(order),
     merchandise: order.total - order.shippingCost, shipping: order.shippingCost, total: order.total,
+    subtotal: order.subtotal ?? order.total - order.shippingCost + (order.productDiscount ?? 0) + (order.couponDiscount ?? 0),
+    productDiscount: order.productDiscount ?? 0, couponDiscount: order.couponDiscount ?? 0,
+    discounts: (order.productDiscount ?? 0) + (order.couponDiscount ?? 0), couponCode: order.couponCode ?? null,
     units: order.items.reduce((sum, item) => sum + item.quantity, 0),
     shippingMethodName: order.shippingMethodName?.trim() || 'روش ارسال ثبت نشده',
   }
@@ -388,7 +409,7 @@ export function salesLedgerCsv(rows: SalesLedgerRow[]): string {
   const timeFormatter = new Intl.DateTimeFormat('en-GB', {
     timeZone: SALES_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
   })
-  const headers = ['شناسه سفارش', 'تاریخ ثبت (تهران، میلادی)', 'نام مشتری', 'وضعیت سفارش', 'وضعیت پرداخت', 'تعداد جفت', 'مبلغ کالا (تومان)', 'ارسال دریافتی (تومان)', 'مبلغ سفارش (تومان)', 'روش ارسال']
+  const headers = ['شناسه سفارش', 'تاریخ ثبت (تهران، میلادی)', 'نام مشتری', 'وضعیت سفارش', 'وضعیت پرداخت', 'تعداد جفت', 'فروش خالص کالا (تومان)', 'ارسال دریافتی (تومان)', 'مبلغ سفارش (تومان)', 'روش ارسال', 'جمع اولیه کالا (تومان)', 'تخفیف محصول (تومان)', 'تخفیف کد (تومان)', 'جمع تخفیف (تومان)', 'کد تخفیف']
   const lines = [headers.map(csvCell).join(',')]
   for (const row of rows) {
     const date = new Date(row.createdAt)
@@ -396,6 +417,7 @@ export function salesLedgerCsv(rows: SalesLedgerRow[]): string {
       row.id, `${localDay(date)} ${timeFormatter.format(date)}`, row.customerName,
       orderStatusLabels[row.status], paymentClassLabels[row.classification], row.units,
       row.merchandise, row.shipping, row.total, row.shippingMethodName,
+      row.subtotal, row.productDiscount, row.couponDiscount, row.discounts, row.couponCode ?? '',
     ].map(csvCell).join(','))
   }
   return `\uFEFF${lines.join('\r\n')}\r\n`
@@ -403,6 +425,6 @@ export function salesLedgerCsv(rows: SalesLedgerRow[]): string {
 
 export const salesOrderSelect = {
   id: true, createdAt: true, total: true, shippingCost: true, shippingMethodName: true,
-  status: true, verified: true,
-  items: { select: { productId: true, quantity: true, price: true, product: { select: { name: true } } } },
+  status: true, verified: true, subtotal: true, productDiscount: true, couponDiscount: true, couponCode: true,
+  items: { select: { productId: true, quantity: true, price: true, originalPrice: true, couponDiscount: true, product: { select: { name: true } } } },
 } satisfies Prisma.OrderSelect

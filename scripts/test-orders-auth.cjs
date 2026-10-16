@@ -13,6 +13,10 @@ const { code } = transformSync(source, {
 const shippingSource = readFileSync(path.join(__dirname, '../src/lib/shipping.ts'), 'utf8')
 const shippingContext = { module: { exports: {} } }
 vm.runInNewContext(transformSync(shippingSource, { loader: 'ts', format: 'cjs', target: 'es2022' }).code, shippingContext)
+const pricingContext = { module: { exports: {} } }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, pricingContext)
+const couponsContext = { module: { exports: {} } }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/coupons.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, couponsContext)
 
 function loadHandler(session) {
   const queries = []
@@ -21,6 +25,7 @@ function loadHandler(session) {
     'node:crypto': require('node:crypto'),
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true },
     '@/lib/shipping': shippingContext.module.exports,
+    '@/lib/pricing': pricingContext.module.exports, '@/lib/coupons': couponsContext.module.exports,
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
     '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': {

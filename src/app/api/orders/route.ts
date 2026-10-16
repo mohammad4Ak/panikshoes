@@ -7,6 +7,8 @@ import { calculateShippingCost, MAX_SHIPPING_AMOUNT, ShippingValidationError } f
 import { expireUnpaidOrders, methodAvailability } from '@/lib/payments'
 import { PAYMENT_WINDOW_MS } from '@/lib/payment-contract'
 import { isSameOriginRequest } from '@/lib/request-origin'
+import { allocateDiscount, productPricing } from '@/lib/pricing'
+import { CouponError, normalizeCouponCode, quoteCoupon, reserveCoupon } from '@/lib/coupons'
 
 export async function GET() {
   const session = await auth()
@@ -35,7 +37,8 @@ class OrderError extends Error {
     outOfStockDetails?: { productId: string; name: string; availableQuantity: number }[]
     code?: string
     shippingCost?: number
-    productPrices?: { productId: string; price: number }[]
+    productPrices?: { productId: string; price: number; originalPrice: number }[]
+    couponDiscount?: number
     invalidVariants?: { productId: string; size: number; color: string }[]
     existingOrderId?: string
   } = {}) { super(message) }
@@ -97,6 +100,12 @@ export async function POST(request: Request) {
   if (body.expectedSubtotal !== undefined && !validMoney(body.expectedSubtotal)) {
     return NextResponse.json({ error: 'مبلغ محصولات را بازبینی کنید' }, { status: 400 })
   }
+  let couponCode: string | null
+  try { couponCode = normalizeCouponCode(body.couponCode) }
+  catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'کد تخفیف معتبر نیست', code: 'COUPON_INVALID' }, { status: 400 }) }
+  if ((couponCode || body.expectedCouponDiscount !== undefined) && !validMoney(body.expectedCouponDiscount)) {
+    return NextResponse.json({ error: 'مبلغ کد تخفیف را بازبینی کنید', code: 'COUPON_QUOTE_REQUIRED' }, { status: 400 })
+  }
 
   const address = body.address.trim()
   const phone = body.phone.trim()
@@ -134,7 +143,7 @@ export async function POST(request: Request) {
 
   const checkoutFingerprint = checkoutKey ? createHash('sha256').update(JSON.stringify({
     // The quote may refresh after a lost response. It is not a new purchase intent.
-    recipientName, address, phone, shippingMethodId, paymentMethodId,
+    recipientName, address, phone, shippingMethodId, paymentMethodId, ...(couponCode ? { couponCode } : {}),
     items: [...items].sort((left, right) => left.productId.localeCompare(right.productId) ||
       left.size - right.size || left.color.localeCompare(right.color) || left.quantity - right.quantity),
   })).digest('hex') : null
@@ -158,7 +167,7 @@ export async function POST(request: Request) {
     // Return the historical order before reading current stock, prices or carriers.
     const existing = await existingCheckout()
     if (existing) return NextResponse.json(existing)
-    await expireUnpaidOrders()
+    await expireUnpaidOrders(new Date(), undefined, { productIds: [...requestedQuantities.keys()], couponCode })
     // Aggregate sizes/colors of the same product when checking stock.
     const failures: string[] = []
     const failureNames: string[] = []
@@ -192,7 +201,9 @@ export async function POST(request: Request) {
       }
 
       let subtotal = 0
+      let grossSubtotal = 0
       let itemCount = 0
+      const now = new Date()
       const orderItemsData = []
       const products = new Map<string, Product>()
       for (const item of items) {
@@ -214,16 +225,19 @@ export async function POST(request: Request) {
           })
         }
         if (!validMoney(product.price)) throw new OrderError('قیمت یکی از محصولات معتبر نیست')
-        subtotal += product.price * item.quantity
+        const pricing = productPricing(product, now)
+        subtotal += pricing.effectivePrice * item.quantity
+        grossSubtotal += pricing.originalPrice * item.quantity
         itemCount += item.quantity
-        if (!validMoney(subtotal) || !Number.isSafeInteger(itemCount)) {
+        if (!validMoney(subtotal) || !validMoney(grossSubtotal) || !Number.isSafeInteger(itemCount)) {
           throw new OrderError('مبلغ سفارش از سقف مجاز بیشتر است')
         }
-        orderItemsData.push({ ...item, productName: product.name, price: product.price })
+        orderItemsData.push({ ...item, productName: product.name, price: pricing.effectivePrice, originalPrice: pricing.originalPrice, couponDiscount: 0 })
       }
 
-      const shippingCost = calculateShippingCost(method, subtotal, itemCount)
-      const productPrices = [...products].map(([productId, product]) => ({ productId, price: product.price }))
+      const coupon = await quoteCoupon(tx, couponCode, session.user.id, subtotal, now)
+      const shippingCost = calculateShippingCost(method, subtotal - coupon.discount, itemCount)
+      const productPrices = [...products].map(([productId, product]) => ({ productId, price: productPricing(product, now).effectivePrice, originalPrice: product.price }))
       if (expectedSubtotal !== undefined && subtotal !== expectedSubtotal) {
         throw new OrderError('قیمت محصولات تغییر کرده است؛ مبلغ جدید را بازبینی و دوباره سفارش را ثبت کنید', {
           status: 409, code: 'ORDER_PRICES_CHANGED', shippingCost, productPrices,
@@ -234,8 +248,15 @@ export async function POST(request: Request) {
           status: 409, code: 'SHIPPING_QUOTE_CHANGED', shippingCost, productPrices,
         })
       }
-      const total = subtotal + shippingCost
+      if (body.expectedCouponDiscount !== undefined && body.expectedCouponDiscount !== coupon.discount) {
+        throw new OrderError('مبلغ کد تخفیف تغییر کرده است؛ تخفیف و مبلغ نهایی را دوباره بررسی کنید', {
+          status: 409, code: 'COUPON_QUOTE_CHANGED', couponDiscount: coupon.discount, shippingCost, productPrices,
+        })
+      }
+      const total = subtotal - coupon.discount + shippingCost
       if (!validMoney(total)) throw new OrderError('مبلغ سفارش از سقف مجاز بیشتر است')
+      const allocated = allocateDiscount(orderItemsData.map((item) => item.price * item.quantity), coupon.discount)
+      orderItemsData.forEach((item, index) => { item.couponDiscount = allocated[index] })
 
       // Keep atomic stock protection; any failure rolls back the entire order.
       for (const [productId, quantity] of [...requestedQuantities].sort(([left], [right]) => left.localeCompare(right))) {
@@ -252,9 +273,11 @@ export async function POST(request: Request) {
         }
       }
 
-      return tx.order.create({
+      const created = await tx.order.create({
         data: {
           userId: session.user.id, total, address, phone, recipientName, checkoutKey, checkoutFingerprint,
+          subtotal: grossSubtotal, productDiscount: grossSubtotal - subtotal,
+          couponId: coupon.couponId, couponCode: coupon.code, couponDiscount: coupon.discount,
           shippingMethodId: method.id, shippingMethodName: method.name, shippingCost,
           paymentMethod: paymentMethod.id, paymentStatus: 'AWAITING_RECEIPT',
           paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
@@ -264,6 +287,8 @@ export async function POST(request: Request) {
         },
         include: { items: true, invoice: { select: { id: true, issuedAt: true } } },
       })
+      await reserveCoupon(tx, coupon, session.user.id, created.id, now)
+      return created
     })
     return NextResponse.json(order, { status: 201 })
   } catch (error) {
@@ -287,6 +312,7 @@ export async function POST(request: Request) {
     if (error instanceof ShippingValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
+    if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     // A method may be deleted after it was read but before the order's FK is written.
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2003' &&
         'meta' in error && error.meta && typeof error.meta === 'object' && 'field_name' in error.meta &&

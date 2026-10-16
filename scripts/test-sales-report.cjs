@@ -164,6 +164,53 @@ const accountingOrders = [
 
 const accountingReport = () => reports.buildSalesReport(accountingOrders, accountingRange, { products: 40, users: 90 }, fixedNow)
 
+test('Discount accounting reconciles gross, direct discounts, coupon allocation, merchandise and receipts exactly', () => {
+  const discounted = order('discounted', {
+    subtotal: 1000, productDiscount: 100, couponDiscount: 101, couponCode: 'PANIK101', total: 849, shippingCost: 50,
+    items: [
+      { productId: 'one', product: { name: 'مدل یک' }, originalPrice: 300, price: 270, quantity: 2, couponDiscount: 61 },
+      { productId: 'two', product: { name: 'مدل دو' }, originalPrice: 400, price: 360, quantity: 1, couponDiscount: 40 },
+    ],
+  })
+  const report = reports.buildSalesReport([discounted,
+    { ...discounted, id: 'unpaid', verified: false }, { ...discounted, id: 'cancelled', status: 'CANCELLED' },
+  ], accountingRange, { products: 2, users: 1 }, fixedNow)
+  assert.equal(report.summary.grossMerchandise, 1000)
+  assert.equal(report.summary.productDiscount, 100)
+  assert.equal(report.summary.couponDiscount, 101)
+  assert.equal(report.summary.discounts, 201)
+  assert.equal(report.summary.merchandise, 799)
+  assert.equal(report.summary.receipts, 849)
+  assert.equal(report.summary.paidOrders, 1)
+  assert.equal(report.summary.grossMerchandise - report.summary.discounts + report.summary.shipping, report.summary.receipts)
+  assert.deepEqual(plain(report.topProducts.map(row => [row.productId, row.merchandise])), [['one', 479], ['two', 320]])
+  assert.equal(report.topProducts.reduce((sum, row) => sum + row.merchandise, 0), report.summary.merchandise)
+  const row = reports.buildSalesLedgerRow(discounted)
+  assert.equal(row.subtotal - row.discounts + row.shipping, row.total)
+  assert.equal(row.couponCode, 'PANIK101')
+  const cells = parseCsv(reports.salesLedgerCsv([row]))
+  assert.deepEqual(cells[1].slice(10), ['1000', '100', '101', '201', 'PANIK101'])
+})
+
+test('Historical null discount snapshots retain exact reported amounts with zero discount columns', () => {
+  const historical = order('historical', { subtotal: null, productDiscount: 0, couponDiscount: 0, couponCode: null,
+    items: [{ productId: 'shoe-1', product: { name: 'مدل قدیمی' }, originalPrice: null, price: 100000, quantity: 2, couponDiscount: 0 }],
+  })
+  const report = reports.buildSalesReport([historical], accountingRange, { products: 1, users: 1 }, fixedNow)
+  assert.equal(report.summary.receipts, 210000)
+  assert.equal(report.summary.merchandise, 200000)
+  assert.equal(report.summary.grossMerchandise, 200000)
+  assert.equal(report.summary.discounts, 0)
+  assert.equal(report.topProducts[0].merchandise, 200000)
+  const row = reports.buildSalesLedgerRow(historical)
+  assert.deepEqual(parseCsv(reports.salesLedgerCsv([row]))[1].slice(10), ['200000', '0', '0', '0', ''])
+})
+
+test('Coupon codes are escaped against spreadsheet formula injection in discount exports', () => {
+  const row = reports.buildSalesLedgerRow(order('coupon-csv', { couponCode: '=HYPERLINK("https://example.test")' }))
+  assert.equal(parseCsv(reports.salesLedgerCsv([row]))[1][14], '\'=HYPERLINK("https://example.test")')
+})
+
 test('Receipts include verified, noncancelled orders only; shipping collected is separate from merchandise', () => {
   const report = accountingReport()
   assert.equal(report.summary.orders, 6)
@@ -379,7 +426,7 @@ test('An empty CSV still has a valid BOM and its complete column header', () => 
   const csv = reports.salesLedgerCsv([])
   assert.equal(csv.charCodeAt(0), 0xFEFF)
   assert.equal(parseCsv(csv).length, 1)
-  assert.equal(parseCsv(csv)[0].length, 10)
+  assert.equal(parseCsv(csv)[0].length, 15)
 })
 
 function matches(row, where = {}) {

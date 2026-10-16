@@ -361,6 +361,7 @@ function homeHarness(rows, overrides = {}) {
     '@/components/shop/HomeContent': { HomeBanner: 'HomeBanner', HomeSelectionGuide: 'HomeSelectionGuide', HomePurchaseInfo: 'HomePurchaseInfo' },
     '@/lib/site-settings': { getSiteSettings: async () => settings },
     '@/lib/home-hero': hero,
+    '@/lib/pricing': load('src/lib/pricing.ts'),
     '@/components/shop/HomeHeroCarousel': { __esModule: true, default: 'HomeHeroCarousel' },
     './home.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
   }).default

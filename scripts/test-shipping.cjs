@@ -21,6 +21,8 @@ function loadModule(relativePath, dependencies = {}) {
 }
 
 const shipping = loadModule('src/lib/shipping.ts')
+const pricing = loadModule('src/lib/pricing.ts')
+const coupons = loadModule('src/lib/coupons.ts')
 const method = {
   id: 'shipping-1', name: 'پست پیشتاز', description: null,
   baseCost: 90000, additionalItemCost: 15000,
@@ -111,6 +113,7 @@ function loadRoute(relativePath, { session = { user: { id: 'admin-1', role: 'ADM
     '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': { prisma },
     '@/lib/shipping': shipping,
+    '@/lib/pricing': pricing, '@/lib/coupons': coupons,
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
 }
@@ -318,7 +321,7 @@ test('A stale or tampered quote returns the current fee before reserving stock o
   const error = await response.json()
   assert.equal(error.code, 'SHIPPING_QUOTE_CHANGED')
   assert.equal(error.shippingCost, 105000)
-  assert.deepEqual(error.productPrices, [{ productId: 'product-1', price: 1000000 }])
+  assert.deepEqual(error.productPrices, [{ productId: 'product-1', price: 1000000, originalPrice: 1000000 }])
   assert.equal(h.committed.products.get('product-1').stock, 8)
   assert.equal(h.committed.orders.length, 0)
   assert.ok(!h.events.includes('transaction-stock'))
@@ -331,7 +334,7 @@ test('Changed product prices require subtotal confirmation even when the shippin
   const error = await response.json()
   assert.equal(error.code, 'ORDER_PRICES_CHANGED')
   assert.equal(error.shippingCost, 105000)
-  assert.deepEqual(error.productPrices, [{ productId: 'product-1', price: 1000000 }])
+  assert.deepEqual(error.productPrices, [{ productId: 'product-1', price: 1000000, originalPrice: 1000000 }])
   assert.equal(h.committed.orders.length, 0)
   assert.equal(h.committed.products.get('product-1').stock, 8)
   assert.ok(!h.events.includes('transaction-stock'))
@@ -350,7 +353,7 @@ test('A subtotal conflict returns fresh database prices for every product in the
   assert.equal(error.code, 'ORDER_PRICES_CHANGED')
   assert.equal(error.shippingCost, 120000)
   assert.deepEqual(error.productPrices, [
-    { productId: 'product-1', price: 1000000 }, { productId: 'product-2', price: 500000 },
+    { productId: 'product-1', price: 1000000, originalPrice: 1000000 }, { productId: 'product-2', price: 500000, originalPrice: 500000 },
   ])
   assert.equal(h.committed.orders.length, 0)
   assert.ok(!h.events.includes('transaction-stock'))

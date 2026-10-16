@@ -5,7 +5,10 @@ import Link from 'next/link'
 import { Plus, Pencil, Trash2, Eye, X, ArrowUp, ArrowDown } from 'lucide-react'
 import MultiImageInput from '@/components/admin/MultiImageInput'
 import EnhancedSelect from '@/components/ui/EnhancedSelect'
+import PersianDatePicker from '@/components/ui/PersianDatePicker'
+import FormattedNumberInput from '@/components/ui/FormattedNumberInput'
 import { formatPrice } from '@/lib/utils'
+import { productPricing } from '@/lib/pricing'
 import styles from '@/components/admin/admin.module.css'
 import productStyles from './products.module.css'
 
@@ -20,6 +23,9 @@ interface Product {
   slug: string
   description: string
   price: number
+  salePrice?: number | null
+  saleStartsAt?: string | null
+  saleEndsAt?: string | null
   images: string[]
   type: 'SNEAKER' | 'FORMAL'
   sizes: number[]
@@ -35,6 +41,9 @@ const emptyForm = {
   name: '',
   description: '',
   price: '',
+  salePrice: '',
+  saleStartsAt: '',
+  saleEndsAt: '',
   images: [] as string[],
   categoryId: '',
   sizes: '40, 41, 42, 43',
@@ -42,6 +51,21 @@ const emptyForm = {
   stock: '',
   featured: false,
   specifications: [] as SpecificationRow[],
+}
+
+function dateTimeInput(value?: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const pad = (number: number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function discountStatus(product: Product) {
+  if (product.salePrice == null) return ''
+  if (productPricing(product).isDiscounted) return 'تخفیف فعال'
+  if (product.saleStartsAt && new Date(product.saleStartsAt).getTime() > Date.now()) return 'تخفیف زمان‌بندی‌شده'
+  return 'تخفیف پایان‌یافته'
 }
 
 export default function AdminProductsPage() {
@@ -54,7 +78,9 @@ export default function AdminProductsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [originalStock, setOriginalStock] = useState<number | null>(null)
+  const [originalPricing, setOriginalPricing] = useState<Pick<Product, 'price' | 'salePrice' | 'saleStartsAt' | 'saleEndsAt'> | null>(null)
   const [stockConflict, setStockConflict] = useState(false)
+  const [priceConflict, setPriceConflict] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const nextSpecificationKey = useRef(0)
   const [saving, setSaving] = useState(false)
@@ -91,7 +117,9 @@ export default function AdminProductsPage() {
   const openCreateModal = () => {
     setEditingId(null)
     setOriginalStock(null)
+    setOriginalPricing(null)
     setStockConflict(false)
+    setPriceConflict(false)
     setForm({ ...emptyForm, categoryId: categories[0]?.id ?? '' })
     setMessage(null)
     setModalOpen(true)
@@ -101,11 +129,16 @@ export default function AdminProductsPage() {
   const openEditModal = (product: Product) => {
     setEditingId(product.id)
     setOriginalStock(product.stock)
+    setOriginalPricing({ price: product.price, salePrice: product.salePrice ?? null, saleStartsAt: product.saleStartsAt ?? null, saleEndsAt: product.saleEndsAt ?? null })
     setStockConflict(false)
+    setPriceConflict(false)
     setForm({
       name: product.name,
       description: product.description,
       price: String(product.price),
+      salePrice: product.salePrice == null ? '' : String(product.salePrice),
+      saleStartsAt: dateTimeInput(product.saleStartsAt),
+      saleEndsAt: dateTimeInput(product.saleEndsAt),
       images: product.images,
       categoryId: product.categoryId,
       sizes: product.sizes.join(', '),
@@ -141,7 +174,7 @@ export default function AdminProductsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (saving || stockConflict) return
+    if (saving || stockConflict || priceConflict) return
     const sizeText = form.sizes.trim()
       .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - '۰'.charCodeAt(0)))
       .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - '٠'.charCodeAt(0)))
@@ -164,13 +197,33 @@ export default function AdminProductsPage() {
       setMessage({ text: 'نام مشخصه‌ها تکراری است. برای هر مشخصه فقط یک ردیف نگه دار.', error: true })
       return
     }
+    if (form.salePrice !== '' && (!Number.isSafeInteger(Number(form.salePrice)) || Number(form.salePrice) < 1 || Number(form.salePrice) >= Number(form.price))) {
+      setMessage({ text: 'قیمت بعد از تخفیف باید عدد صحیح، بیشتر از صفر و کمتر از قیمت اصلی باشد.', error: true })
+      return
+    }
+    const saleStartsAt = form.salePrice && form.saleStartsAt ? new Date(form.saleStartsAt) : null
+    const saleEndsAt = form.salePrice && form.saleEndsAt ? new Date(form.saleEndsAt) : null
+    if ((saleStartsAt && !Number.isFinite(saleStartsAt.getTime())) || (saleEndsAt && !Number.isFinite(saleEndsAt.getTime())) || (saleStartsAt && saleEndsAt && saleEndsAt <= saleStartsAt)) {
+      setMessage({ text: 'زمان‌بندی تخفیف معتبر نیست؛ پایان باید بعد از شروع باشد.', error: true })
+      return
+    }
     setSaving(true)
     setMessage(null)
 
+    const pricing = {
+      price: Number(form.price), salePrice: form.salePrice === '' ? null : Number(form.salePrice),
+      saleStartsAt: saleStartsAt?.toISOString() ?? null, saleEndsAt: saleEndsAt?.toISOString() ?? null,
+    }
+    // Preserve exact stored timestamps unless their minute-level inputs changed.
+    if (originalPricing && form.salePrice !== '') {
+      if (form.saleStartsAt === dateTimeInput(originalPricing.saleStartsAt)) pricing.saleStartsAt = originalPricing.saleStartsAt ?? null
+      if (form.saleEndsAt === dateTimeInput(originalPricing.saleEndsAt)) pricing.saleEndsAt = originalPricing.saleEndsAt ?? null
+    }
+    const pricingChanged = !originalPricing || Object.entries(pricing).some(([key, value]) => value !== originalPricing[key as keyof typeof originalPricing])
     const payload = {
       name: form.name,
       description: form.description,
-      price: Number(form.price),
+      ...(pricingChanged ? { ...pricing, ...(editingId ? { expectedPricing: originalPricing } : {}) } : {}),
       images: form.images,
       categoryId: form.categoryId,
       sizes: sizeEntries.map(Number),
@@ -193,6 +246,7 @@ export default function AdminProductsPage() {
 
       if (!res.ok) {
         if (data.code === 'PRODUCT_STOCK_CHANGED') setStockConflict(true)
+        if (data.code === 'PRODUCT_PRICE_CHANGED') setPriceConflict(true)
         setMessage({ text: data.error || 'خطا در ذخیره محصول', error: true })
         return
       }
@@ -208,18 +262,25 @@ export default function AdminProductsPage() {
     }
   }
 
-  const refreshStock = async () => {
+  const refreshStock = async (pricingOnly = false) => {
     if (!editingId || saving) return
     setSaving(true)
     try {
       const res = await fetch(`/api/products/${encodeURIComponent(editingId)}`, { cache: 'no-store' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'دریافت موجودی تازه انجام نشد.')
-      if (!Number.isSafeInteger(data.stock) || data.stock < 0) throw new Error('پاسخ موجودی معتبر نیست.')
-      setOriginalStock(data.stock)
-      setForm((previous) => ({ ...previous, stock: String(data.stock) }))
-      setStockConflict(false)
-      setMessage({ text: 'موجودی تازه بارگذاری شد. مقدار موجودی را بررسی کن و سپس تغییرات را ذخیره کن.', error: false })
+      if (!res.ok) throw new Error(data.error || 'دریافت اطلاعات تازه انجام نشد.')
+      if (pricingOnly) {
+        if (!Number.isSafeInteger(data.price) || data.price < 1) throw new Error('پاسخ قیمت معتبر نیست.')
+        setOriginalPricing({ price: data.price, salePrice: data.salePrice ?? null, saleStartsAt: data.saleStartsAt ?? null, saleEndsAt: data.saleEndsAt ?? null })
+        setForm(previous => ({ ...previous, price: String(data.price), salePrice: data.salePrice == null ? '' : String(data.salePrice), saleStartsAt: dateTimeInput(data.saleStartsAt), saleEndsAt: dateTimeInput(data.saleEndsAt) }))
+        setPriceConflict(false)
+      } else {
+        if (!Number.isSafeInteger(data.stock) || data.stock < 0) throw new Error('پاسخ موجودی معتبر نیست.')
+        setOriginalStock(data.stock)
+        setForm((previous) => ({ ...previous, stock: String(data.stock) }))
+        setStockConflict(false)
+      }
+      setMessage({ text: pricingOnly ? 'قیمت و تخفیف تازه بارگذاری شدند. آن‌ها را بررسی کن و سپس تغییرات را ذخیره کن.' : 'موجودی تازه بارگذاری شد. مقدار موجودی را بررسی کن و سپس تغییرات را ذخیره کن.', error: false })
     } catch (cause) {
       setMessage({ text: cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'دریافت موجودی تازه انجام نشد.', error: true })
     } finally {
@@ -296,8 +357,8 @@ export default function AdminProductsPage() {
                       {product.category.name}
                     </span>
                   </td>
-                  <td className="px-6 py-4">{formatPrice(product.price)} تومان</td>
-                  <td className="px-6 py-4">{product.stock}</td>
+                  <td className="px-6 py-4"><div className={productStyles.tablePrice}>{productPricing(product).isDiscounted && <del>{formatPrice(product.price)} تومان</del>}<span>{formatPrice(productPricing(product).effectivePrice)} تومان</span>{product.salePrice != null && <small>{discountStatus(product)}</small>}</div></td>
+                  <td className="px-6 py-4">{product.stock.toLocaleString('fa-IR')}</td>
                   <td className="px-6 py-4">
                     {product.featured && <span className="text-green-600 font-bold">✓</span>}
                   </td>
@@ -382,24 +443,24 @@ export default function AdminProductsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-bold mb-2">قیمت (تومان) *</label>
-                  <input
+                  <label className="block font-bold mb-2">قیمت اصلی (تومان) *</label>
+                  <FormattedNumberInput
                     required
-                    type="number"
-                    min={0}
+                    min={1}
+                    max={2_147_483_647}
                     className="input-field"
                     value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    onValueChange={value => setForm({ ...form, price: value })}
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-2">موجودی</label>
-                  <input
-                    type="number"
+                  <FormattedNumberInput
                     min={0}
+                    max={2_147_483_647}
                     className="input-field"
                     value={form.stock}
-                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
+                    onValueChange={value => setForm({ ...form, stock: value })}
                   />
                 </div>
                 <div>
@@ -444,6 +505,18 @@ export default function AdminProductsPage() {
                   />
                 </div>
               </div>
+
+              <fieldset className={productStyles.discount} disabled={saving}>
+                <legend>تخفیف مستقیم محصول</legend>
+                <p className={productStyles.hint}>قیمت نهاییِ بعد از تخفیف را وارد کن. با خالی گذاشتن این قیمت، محصول با قیمت اصلی فروخته می‌شود.</p>
+                <div className={productStyles.discountGrid}>
+                  <div><label htmlFor="product-sale-price">قیمت بعد از تخفیف (تومان)</label><FormattedNumberInput id="product-sale-price" className="input-field" min={1} max={2_147_483_647} value={form.salePrice} placeholder="بدون تخفیف" onValueChange={value => setForm({ ...form, salePrice: value, ...(value === '' ? { saleStartsAt: '', saleEndsAt: '' } : {}) })} /></div>
+                  <div><label htmlFor="product-sale-start">شروع تخفیف (اختیاری)</label><PersianDatePicker aria-label="شروع تخفیف" id="product-sale-start" includeTime disabled={!form.salePrice || saving} value={form.saleStartsAt} onChange={value => setForm({ ...form, saleStartsAt: value })} /></div>
+                  <div><label htmlFor="product-sale-end">پایان تخفیف (اختیاری)</label><PersianDatePicker aria-label="پایان تخفیف" id="product-sale-end" includeTime disabled={!form.salePrice || saving} value={form.saleEndsAt} onChange={value => setForm({ ...form, saleEndsAt: value })} /></div>
+                </div>
+                <p className={productStyles.hint}>بدون زمان شروع، تخفیف بلافاصله فعال می‌شود؛ بدون زمان پایان، تا حذف آن ادامه دارد. ساعت‌ها مطابق منطقهٔ زمانی دستگاه شما هستند.</p>
+                {form.salePrice && <button className={productStyles.clearDiscount} type="button" onClick={() => setForm({ ...form, salePrice: '', saleStartsAt: '', saleEndsAt: '' })}>حذف تخفیف محصول</button>}
+              </fieldset>
 
               <fieldset className={productStyles.specifications} disabled={saving}>
                 <legend>مشخصات کفش</legend>
@@ -499,13 +572,14 @@ export default function AdminProductsPage() {
                 >
                   {message.text}
                   {stockConflict && <button type="button" onClick={() => void refreshStock()} disabled={saving} className="btn-outline mt-3 block disabled:opacity-50">تازه‌سازی موجودی</button>}
+                  {priceConflict && <button type="button" onClick={() => void refreshStock(true)} disabled={saving} className="btn-outline mt-3 block disabled:opacity-50">تازه‌سازی قیمت و تخفیف</button>}
                 </div>
               )}
 
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"
-                  disabled={saving || stockConflict}
+                  disabled={saving || stockConflict || priceConflict}
                   className="btn-primary flex-1 disabled:opacity-50"
                 >
                   {saving ? 'در حال ذخیره...' : editingId ? 'ذخیره تغییرات' : 'افزودن محصول'}

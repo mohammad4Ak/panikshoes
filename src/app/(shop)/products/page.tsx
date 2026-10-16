@@ -9,6 +9,7 @@ import { X, ArrowUpDown, Search, SlidersHorizontal } from 'lucide-react'
 import ProductCard from '@/components/shop/ProductCard'
 import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import { useSiteSettings } from '@/components/layout/SiteSettingsProvider'
+import { productPricing } from '@/lib/pricing'
 import styles from '@/components/shop/commerce.module.css'
 
 interface ApiProduct {
@@ -17,6 +18,9 @@ interface ApiProduct {
   slug: string
   description: string
   price: number
+  salePrice?: number | null
+  saleStartsAt?: string | null
+  saleEndsAt?: string | null
   images: string[]
   stock: number
   categoryId: string
@@ -55,6 +59,7 @@ function ProductsContent() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [pricingNow, setPricingNow] = useState(() => Date.now())
 
   const activeCat = searchParams.get('cat') || 'ALL'
   const query = searchParams.get('q') ?? ''
@@ -78,6 +83,7 @@ function ProductsContent() {
         const [items, groups] = await Promise.all([loadList('/api/products'), loadList('/api/categories')])
         if (!controller.signal.aborted) {
           setProducts(items)
+          setPricingNow(Date.now())
           setCategories(groups)
         }
       } catch (cause) {
@@ -92,25 +98,34 @@ function ProductsContent() {
     return () => controller.abort()
   }, [reloadKey])
 
+  useEffect(() => {
+    const now = Date.now()
+    const next = products.flatMap(product => [product.saleStartsAt, product.saleEndsAt]).map(value => value ? Date.parse(value) : NaN).filter(value => Number.isFinite(value) && value > pricingNow)
+    if (!next.length) return
+    const timer = setTimeout(() => setPricingNow(Date.now()), Math.max(0, Math.min(Math.min(...next) - now + 20, 2_147_483_647)))
+    return () => clearTimeout(timer)
+  }, [products, pricingNow])
+
   const filtered = useMemo(() => {
     const min = minPrice === '' ? null : Number(minPrice)
     const max = maxPrice === '' ? null : Number(maxPrice)
     const searchQuery = query.trim().toLocaleLowerCase()
+    const priceOf = (product: ApiProduct) => productPricing(product, new Date(pricingNow)).effectivePrice
 
     const list = products.filter((p) => {
       if (activeCat !== 'ALL' && p.categoryId !== activeCat) return false
       if (searchQuery && ![p.name, p.slug, p.description].some((text) => text?.toLocaleLowerCase().includes(searchQuery))) return false
-      if (min !== null && !isNaN(min) && p.price < min) return false
-      if (max !== null && !isNaN(max) && p.price > max) return false
+      if (min !== null && !isNaN(min) && priceOf(p) < min) return false
+      if (max !== null && !isNaN(max) && priceOf(p) > max) return false
       if (inStockOnly && p.stock <= 0) return false
       return true
     })
 
     switch (sort) {
       case 'cheap':
-        return [...list].sort((a, b) => a.price - b.price)
+        return [...list].sort((a, b) => priceOf(a) - priceOf(b))
       case 'expensive':
-        return [...list].sort((a, b) => b.price - a.price)
+        return [...list].sort((a, b) => priceOf(b) - priceOf(a))
       case 'popular':
         return [...list].sort((a, b) => (b.ratingAverage ?? 0) - (a.ratingAverage ?? 0) || (b.ratingCount ?? 0) - (a.ratingCount ?? 0))
       case 'views':
@@ -118,7 +133,7 @@ function ProductsContent() {
       default:
         return list // جدیدترین = ترتیب API بر اساس createdAt desc
     }
-  }, [products, activeCat, query, sort, minPrice, maxPrice, inStockOnly])
+  }, [products, activeCat, query, sort, minPrice, maxPrice, inStockOnly, pricingNow])
 
   const activeCategoryName = categories.find((c) => c.id === activeCat)?.name
 
@@ -260,6 +275,9 @@ function ProductsContent() {
                   name: product.name,
                   slug: product.slug,
                   price: product.price,
+                  salePrice: product.salePrice,
+                  saleStartsAt: product.saleStartsAt,
+                  saleEndsAt: product.saleEndsAt,
                   image: product.images[0],
                   category: product.category?.name ?? '',
                   stock: product.stock,

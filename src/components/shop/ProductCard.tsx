@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { Plus, Star } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
+import { productPricing } from '@/lib/pricing'
 import styles from './commerce.module.css'
 import engagement from './product-engagement.module.css'
 
@@ -16,6 +17,9 @@ interface Product {
   name: string
   slug: string
   price: number
+  salePrice?: number | null
+  saleStartsAt?: string | null
+  saleEndsAt?: string | null
   image: string
   category: string
   stock?: number
@@ -31,6 +35,7 @@ interface ProductCardProps {
 export default function ProductCard({ product, revealDelay = 0 }: ProductCardProps) {
   const outOfStock = product.stock !== undefined && product.stock <= 0
   const href = `/products/${encodeURIComponent(product.slug)}`
+  const pricing = productPricing(product)
 
   return (
     <article className={styles.product} data-reveal data-reveal-delay={revealDelay}>
@@ -56,6 +61,7 @@ export default function ProductCard({ product, revealDelay = 0 }: ProductCardPro
             ناموجود
           </span>
         )}
+        {pricing.isDiscounted && <span className={styles.discountTag}>{pricing.discountPercent ? `${formatPrice(pricing.discountPercent)}٪ تخفیف` : 'تخفیف ویژه'}</span>}
       </Link>
 
       <div className={styles.productInfo}>
@@ -65,9 +71,10 @@ export default function ProductCard({ product, revealDelay = 0 }: ProductCardPro
         {(product.ratingCount ?? 0) > 0 && <div className={engagement.cardRating} aria-label={`امتیاز ${ratingNumber.format(product.ratingAverage ?? 0)} از ۵، بر اساس ${formatPrice(product.ratingCount ?? 0)} امتیاز`}><Star size={14} aria-hidden="true" /><strong>{ratingNumber.format(product.ratingAverage ?? 0)}</strong><span>({formatPrice(product.ratingCount ?? 0)} امتیاز)</span></div>}
 
         <div className={styles.productBottom}>
-          <span className={styles.price}>
-            {formatPrice(product.price)} <small>تومان</small>
-          </span>
+          <div className={styles.priceStack}>
+            {pricing.isDiscounted && <del className={styles.originalPrice}>{formatPrice(pricing.originalPrice)} <small>تومان</small></del>}
+            <span className={styles.price}>{formatPrice(pricing.effectivePrice)} <small>تومان</small></span>
+          </div>
           {outOfStock ? <button disabled aria-label={`${product.name} ناموجود است`} title="ناموجود" className={styles.add}><Plus size={19} /></button> :
             <Link href={href} aria-label={`انتخاب سایز و رنگ ${product.name}`} title="انتخاب سایز و رنگ" className={styles.add} data-motion="lift"><Plus size={19} /></Link>}
         </div>

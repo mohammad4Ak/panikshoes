@@ -16,7 +16,7 @@ type PaymentStatus = 'success' | 'failed' | 'pending' | 'unknown'
 
 interface PaymentResultProps {
   status: PaymentStatus
-  order?: { id: string; amount: number; createdAt: string; shippingMethodName?: string | null; shippingCost?: number; status?: string }
+  order?: { id: string; amount: number; createdAt: string; shippingMethodName?: string | null; shippingCost?: number; status?: string; subtotal?: number | null; productDiscount?: number; couponDiscount?: number; couponCode?: string | null }
   isPreview?: boolean
   requiresLogin?: boolean
   unavailable?: boolean
@@ -124,6 +124,11 @@ export default function PaymentResult({ status, order, isPreview = false, requir
                 <div className={styles.orderId}><dt>شمارهٔ سفارش</dt><dd dir="ltr">{receipt.id}</dd></div>
                 {receipt.status === 'CANCELLED' && <div><dt>وضعیت سفارش</dt><dd>لغو شده</dd></div>}
                 {validDate && <div><dt>تاریخ ثبت سفارش</dt><dd><time dateTime={validDate.toISOString()}>{new Intl.DateTimeFormat('fa-IR', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Tehran' }).format(validDate)}</time></dd></div>}
+                {((receipt.productDiscount ?? 0) > 0 || (receipt.couponDiscount ?? 0) > 0) && <>
+                  <div><dt>جمع اولیهٔ کالاها</dt><dd>{formatPrice(receipt.subtotal ?? receipt.amount - (receipt.shippingCost ?? 0) + (receipt.productDiscount ?? 0) + (receipt.couponDiscount ?? 0))} <span>تومان</span></dd></div>
+                  {(receipt.productDiscount ?? 0) > 0 && <div><dt>تخفیف محصولات</dt><dd>−{formatPrice(receipt.productDiscount!)} <span>تومان</span></dd></div>}
+                  {(receipt.couponDiscount ?? 0) > 0 && <div><dt>تخفیف کد {receipt.couponCode && <bdi>{receipt.couponCode}</bdi>}</dt><dd>−{formatPrice(receipt.couponDiscount!)} <span>تومان</span></dd></div>}
+                </>}
                 {receipt.shippingCost !== undefined && <>
                   <div><dt>روش ارسال</dt><dd>{receipt.shippingMethodName || 'ثبت نشده'}</dd></div>
                   <div><dt>هزینهٔ ارسال</dt><dd>{formatPrice(receipt.shippingCost)} <span>تومان</span></dd></div>

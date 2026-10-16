@@ -224,12 +224,18 @@ export async function renderInvoicePdf(
 
   function itemCells(item: InvoiceSnapshot['items'][number]): string[][] {
     doc.setFontSize(9)
+    const unitPrice = item.originalUnitPrice != null && item.originalUnitPrice > item.unitPrice
+      ? `اصلی: ${formatNumber(item.originalUnitPrice)}\nبا تخفیف: ${formatNumber(item.unitPrice)}`
+      : formatNumber(item.unitPrice)
+    const lineTotal = (item.couponDiscount ?? 0) > 0
+      ? `${formatNumber(item.lineTotal)}\nتخفیف کد: ${formatNumber(item.couponDiscount!)}`
+      : formatNumber(item.lineTotal)
     return [
       wrap(item.productName, 58),
       wrap(`سایز ${formatNumber(item.size)}\nرنگ: ${item.color}`, 29),
       wrap(formatNumber(item.quantity), 9),
-      wrap(formatNumber(item.unitPrice), 27),
-      wrap(formatNumber(item.lineTotal), 27),
+      wrap(unitPrice, 27),
+      wrap(lineTotal, 27),
     ]
   }
 
@@ -291,20 +297,28 @@ export async function renderInvoicePdf(
   if (snapshot.shippingMethodName) {
     field('روش ارسال', snapshot.shippingMethodName, 'ارسال سفارش')
   }
-  if (y + 40 > CONTENT_BOTTOM) y = newPage()
+  if (snapshot.couponCode) field('کد تخفیف', snapshot.couponCode, 'تخفیف سفارش')
+  const totalsRows = [
+    { label: 'جمع کالاها', value: formatNumber(snapshot.subtotal) },
+    ...((snapshot.productDiscount ?? 0) > 0 ? [{ label: 'تخفیف محصول', value: `−${formatNumber(snapshot.productDiscount!)}` }] : []),
+    ...((snapshot.couponDiscount ?? 0) > 0 ? [{ label: 'تخفیف کد', value: `−${formatNumber(snapshot.couponDiscount!)}` }] : []),
+    { label: 'هزینه ارسال', value: snapshot.shippingCost === 0 ? 'رایگان' : formatNumber(snapshot.shippingCost) },
+  ]
+  const totalsHeight = totalsRows.length * 10 + 20
+  if (y + totalsHeight > CONTENT_BOTTOM) y = newPage()
   doc.setFillColor(COLORS.soft)
-  doc.roundedRect(100, y, 95, 40, 3, 3, 'F')
+  doc.roundedRect(100, y, 95, totalsHeight, 3, 3, 'F')
   doc.setFontSize(10)
-  text('جمع کالاها', 190, y + 9)
-  text(formatNumber(snapshot.subtotal), 105, y + 9, { align: 'left' })
-  text('هزینه ارسال', 190, y + 19)
-  text(snapshot.shippingCost === 0 ? 'رایگان' : formatNumber(snapshot.shippingCost), 105, y + 19, { align: 'left' })
+  totalsRows.forEach((row, index) => {
+    text(row.label, 190, y + 9 + index * 10)
+    text(row.value, 105, y + 9 + index * 10, { align: 'left' })
+  })
   doc.setDrawColor('#C4DCCE')
-  doc.line(105, y + 24, 190, y + 24)
+  doc.line(105, y + totalsHeight - 16, 190, y + totalsHeight - 16)
   doc.setTextColor(COLORS.brand)
   doc.setFontSize(11)
-  text(`مبلغ کل (${snapshot.currency})`, 190, y + 33)
-  text(formatNumber(snapshot.total), 105, y + 33, { align: 'left' })
+  text(`مبلغ کل (${snapshot.currency})`, 190, y + totalsHeight - 7)
+  text(formatNumber(snapshot.total), 105, y + totalsHeight - 7, { align: 'left' })
 
   const pageCount = doc.getNumberOfPages()
   for (let page = 1; page <= pageCount; page++) {

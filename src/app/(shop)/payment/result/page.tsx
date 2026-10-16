@@ -20,7 +20,7 @@ async function readPaymentResult(orderId: string): Promise<ComponentProps<typeof
     // Never use callback/query-string status, amount or reference values as proof of payment.
     const order = await prisma.order.findFirst({
       where: { id: orderId, userId: session.user.id },
-      select: { id: true, total: true, verified: true, status: true, createdAt: true, shippingMethodName: true, shippingCost: true, paymentMethod: true },
+      select: { id: true, total: true, verified: true, status: true, createdAt: true, shippingMethodName: true, shippingCost: true, paymentMethod: true, subtotal: true, productDiscount: true, couponDiscount: true, couponCode: true },
     })
     if (!order) return { status: 'unknown' }
     if (order.paymentMethod === 'bank_transfer') return { status: 'pending', transferOrderId: order.id }
@@ -30,6 +30,7 @@ async function readPaymentResult(orderId: string): Promise<ComponentProps<typeof
       order: {
         id: order.id, amount: order.total, createdAt: order.createdAt.toISOString(),
         shippingMethodName: order.shippingMethodName, shippingCost: order.shippingCost,
+        subtotal: order.subtotal, productDiscount: order.productDiscount, couponDiscount: order.couponDiscount, couponCode: order.couponCode,
         status: order.status,
       },
     }

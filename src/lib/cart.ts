@@ -11,7 +11,7 @@ interface CartStore {
   addItem: (item: CartItem) => void
   removeItem: (productId: string, size: number, color: string) => void
   updateQuantity: (productId: string, size: number, color: string, quantity: number) => void
-  syncPrices: (prices: { productId: string; price: number }[]) => void
+  syncPrices: (prices: { productId: string; price: number; originalPrice?: number }[]) => void
   clearCart: () => void
   getTotal: () => number
   getItemsCount: () => number
@@ -47,7 +47,7 @@ export const useCart = create<CartStore>()(
           set({
             items: get().items.map((i) =>
               i.productId === item.productId && i.size === item.size && i.color === item.color
-                ? { ...i, quantity: i.quantity + item.quantity }
+                ? { ...i, price: item.price, originalPrice: item.originalPrice ?? item.price, quantity: i.quantity + item.quantity }
                 : i
             ),
           })
@@ -80,10 +80,10 @@ export const useCart = create<CartStore>()(
       syncPrices: (prices) => {
         const byProduct = new Map(prices
           .filter((entry) => entry && typeof entry.productId === 'string' && Number.isSafeInteger(entry.price) && entry.price >= 0)
-          .map((entry) => [entry.productId, entry.price]))
+          .map((entry) => [entry.productId, { price: entry.price, originalPrice: Number.isSafeInteger(entry.originalPrice) && entry.originalPrice! >= entry.price ? entry.originalPrice! : entry.price }]))
         set((state) => ({
           items: state.items.map((item) => byProduct.has(item.productId)
-            ? { ...item, price: byProduct.get(item.productId)! }
+            ? { ...item, ...byProduct.get(item.productId)! }
             : item),
         }))
       },

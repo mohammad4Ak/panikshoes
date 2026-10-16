@@ -4,6 +4,8 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const pricingModule = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: pricingModule, Date })
 
 const settle = () => new Promise(setImmediate)
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data })
@@ -70,6 +72,7 @@ function mount({ kind = 'reviews', props = {}, session = null, queue = [] } = {}
     '@/components/auth/SessionActivityProvider': { useAppSession: () => ({ session: currentSession }) },
     '@/components/ui/BrandIcons': { SneakerIcon: 'SneakerIcon' },
     '@/lib/utils': { formatPrice: (value) => String(value) },
+    '@/lib/pricing': pricingModule.exports,
     '@/lib/cart': { useCart: (selector) => selector({ addItem: (item) => cart.push(item) }) },
     '@/lib/toast': { toast() {} },
     './ProductReviews': { __esModule: true, default: 'ProductReviews' },
@@ -78,7 +81,7 @@ function mount({ kind = 'reviews', props = {}, session = null, queue = [] } = {}
   let source = readFileSync(path.join(__dirname, '../src/components/shop', files[kind]), 'utf8')
   if (kind === 'form') source = source.replace('function ReviewForm(', 'export function ReviewForm(')
   const context = {
-    module: { exports: {} }, AbortController, Intl, Date,
+    module: { exports: {} }, AbortController, Intl, Date, setTimeout, clearTimeout,
     fetch: async (url, options = {}) => {
       requests.push({ url, ...options })
       const value = queue.length ? queue.shift() : response(kind === 'detail' ? product : report())
@@ -271,6 +274,29 @@ test('Product cards show a rating only when approved ratings exist, preserving s
   assert.ok(find(app, (node) => node.type === 'button' && node.props.disabled))
   app.setProps({ product: { ...product, image: '/one.png', category: 'رسمی', ratingAverage: 0, ratingCount: 0 } })
   assert.equal(find(app, (node) => node.props['aria-label']?.startsWith('امتیاز')), undefined)
+  app.unmount()
+})
+
+test('Product cards display an original price and discount badge only while a sale is active', () => {
+  const app = mount({ kind: 'card', props: { product: { ...product, image: '/one.png', category: 'رسمی', salePrice: 1520000 } } })
+  assert.equal(text(find(app, node => node.type === 'del')), '1900000 تومان')
+  assert.match(text(app.tree), /1520000/)
+  assert.match(text(app.tree), /20٪ تخفیف/)
+  app.setProps({ product: { ...product, image: '/one.png', category: 'رسمی', salePrice: 1520000, saleEndsAt: '2000-01-01T00:00:00Z' } })
+  assert.equal(find(app, node => node.type === 'del'), undefined)
+  assert.ok(!text(app.tree).includes('1520000'))
+  app.unmount()
+})
+
+test('Product detail adds the effective sale price to cart while retaining the original price and selected variant', async () => {
+  const app = mount({ kind: 'detail', queue: [response({ ...product, salePrice: 1500000 })] })
+  await settle(); app.render()
+  assert.equal(text(find(app, node => node.type === 'del')), '1900000 تومان')
+  find(app, node => node.type === 'button' && text(node) === 'افزودن به سبد خرید').props.onClick()
+  assert.equal(app.cart[0].price, 1500000)
+  assert.equal(app.cart[0].originalPrice, 1900000)
+  assert.equal(app.cart[0].size, 38)
+  assert.equal(app.cart[0].color, 'مشکی')
   app.unmount()
 })
 

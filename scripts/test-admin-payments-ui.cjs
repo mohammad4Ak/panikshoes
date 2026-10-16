@@ -83,6 +83,8 @@ function componentApp(file, queues = {}, href = 'https://shop.example.test/admin
     '@/lib/utils': { formatPrice: String },
     '@/lib/payment-contract': contract.exports,
     '@/components/shop/InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
+    '@/components/ui/PersianDatePicker': { __esModule: true, default: 'PersianDatePicker' },
+    '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
   }
   const context = {
     module: { exports: {} }, AbortController, URL, URLSearchParams, window: { location: { href } }, confirm: () => true,

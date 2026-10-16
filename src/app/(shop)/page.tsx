@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { connection } from 'next/server'
 import { ArrowLeft, ArrowUpLeft, SlidersHorizontal } from 'lucide-react'
 import { prisma } from '@/lib/prisma'
+import { productPricing } from '@/lib/pricing'
 import { expireUnpaidOrders, methodAvailability } from '@/lib/payments'
 import { HomeBanner, HomeSelectionGuide, HomePurchaseInfo } from '@/components/shop/HomeContent'
 import { getSiteSettings } from '@/lib/site-settings'
@@ -104,18 +105,21 @@ export default async function HomePage() {
             <Link className={styles.allLink} href="/products?stock=1" data-motion="action">همهٔ مدل‌های موجود <ArrowLeft size={18} /></Link>
           </div>
           {products.length ? <div className={styles.products}>
-            {products.map((product, index) => <Link key={product.id} href={productHref(product.slug)} className={styles.product} data-reveal data-reveal-delay={index % 4}>
+            {products.map((product, index) => {
+              const pricing = productPricing(product)
+              return <Link key={product.id} href={productHref(product.slug)} className={styles.product} data-reveal data-reveal-delay={index % 4}>
               <div className={styles.productPhoto}>
                 {product.images[0] ? <Image src={product.images[0]} alt={product.name} fill sizes="(max-width: 700px) 50vw, 25vw" unoptimized={product.images[0].startsWith('http')} /> : <SneakerIcon className={styles.productPlaceholder} size={50} />}
                 <span className={styles.productTag}>{product.category.name}</span>
                 {product.stock === 1 && <span className={styles.lastPair}>آخرین جفت</span>}
+                {pricing.isDiscounted && <span className={styles.discountTag}>{pricing.discountPercent ? `${numbers.format(pricing.discountPercent)}٪ تخفیف` : 'تخفیف ویژه'}</span>}
               </div>
               <div className={styles.productInfo}>
                 <p className={styles.productSizes}>{product.sizes.length ? `سایز ${product.sizes.map((size) => numbers.format(size)).join('، ')}` : 'مشاهدهٔ مشخصات'}</p>
                 <h3>{product.name}</h3>
-                <div className={styles.productBottom}><p className={styles.price}>{numbers.format(product.price)} <span>تومان</span></p><span className={styles.productArrow}><ArrowUpLeft size={20} /></span></div>
+                <div className={styles.productBottom}><div className={styles.priceStack}>{pricing.isDiscounted && <del className={styles.originalPrice}>{numbers.format(pricing.originalPrice)} تومان</del>}<p className={styles.price}>{numbers.format(pricing.effectivePrice)} <span>تومان</span></p></div><span className={styles.productArrow}><ArrowUpLeft size={20} /></span></div>
               </div>
-            </Link>)}
+            </Link>})}
           </div> : <p className={styles.empty}>مدل‌های تازه به‌زودی به ویترین اضافه می‌شوند.</p>}
         </section>
 

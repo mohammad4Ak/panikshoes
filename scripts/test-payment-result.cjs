@@ -172,3 +172,22 @@ test('Login-required and unavailable receipts suppress private order details and
     assert.doesNotMatch(text, /private-order-id|5200000|سفارش لغو شده است/)
   }
 })
+
+test('Payment result reads stored discount snapshots and keeps the verified amount unchanged', async () => {
+  const page = loadPage({ row: { ...order, verified: true, total: 849, subtotal: 1000, productDiscount: 100,
+    couponDiscount: 101, couponCode: 'PANIK101', shippingCost: 50, shippingMethodName: 'پست' } })
+  const result = await page.render({ orderId: order.id, couponCode: 'FORGED', amount: '1' })
+  assert.equal(result.status, 'success')
+  assert.equal(result.order.amount, 849)
+  assert.equal(result.order.subtotal, 1000)
+  assert.equal(result.order.productDiscount, 100)
+  assert.equal(result.order.couponDiscount, 101)
+  assert.equal(result.order.couponCode, 'PANIK101')
+  const text = receiptText(result)
+  assert.match(text, /جمع اولیهٔ کالاها 1000/)
+  assert.match(text, /تخفیف محصولات −\s*100/)
+  assert.match(text, /PANIK101/)
+  assert.match(text, /−\s*101/)
+  assert.match(text, /مبلغ پرداخت‌شده 849/)
+  assert.doesNotMatch(text, /FORGED/)
+})

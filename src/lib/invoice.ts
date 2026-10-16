@@ -20,8 +20,15 @@ export interface InvoiceSnapshot {
     color: string
     unitPrice: number
     lineTotal: number
+    originalUnitPrice?: number
+    productDiscount?: number
+    couponDiscount?: number
   }[]
   subtotal: number
+  productDiscount?: number
+  couponDiscount?: number
+  couponCode?: string | null
+  merchandiseTotal?: number
   shippingMethodName: string | null
   shippingCost: number
   total: number
@@ -38,6 +45,10 @@ interface InvoiceOrder {
   shippingMethodName: string | null
   shippingCost: number
   total: number
+  subtotal?: number | null
+  productDiscount?: number
+  couponDiscount?: number
+  couponCode?: string | null
   items: {
     productId: string
     productName: string | null
@@ -46,6 +57,8 @@ interface InvoiceOrder {
     size: number
     color: string
     price: number
+    originalPrice?: number | null
+    couponDiscount?: number
   }[]
 }
 
@@ -59,6 +72,7 @@ export function formatInvoiceNumber(invoice: InvoiceMetadata): string {
 }
 
 export function buildInvoiceSnapshot(order: InvoiceOrder, sellerName = 'کفش لند'): InvoiceSnapshot {
+  const hasDiscountSnapshot = order.subtotal != null || (order.productDiscount ?? 0) > 0 || (order.couponDiscount ?? 0) > 0
   const items = order.items.map((item) => ({
     productId: item.productId,
     productName: item.productName ?? item.product.name,
@@ -66,7 +80,12 @@ export function buildInvoiceSnapshot(order: InvoiceOrder, sellerName = 'کفش �
     size: item.size,
     color: item.color,
     unitPrice: item.price,
-    lineTotal: item.price * item.quantity,
+    lineTotal: item.price * item.quantity - (item.couponDiscount ?? 0),
+    ...(hasDiscountSnapshot ? {
+      originalUnitPrice: item.originalPrice ?? item.price,
+      productDiscount: ((item.originalPrice ?? item.price) - item.price) * item.quantity,
+      couponDiscount: item.couponDiscount ?? 0,
+    } : {}),
   }))
   return {
     schemaVersion: 1,
@@ -80,7 +99,13 @@ export function buildInvoiceSnapshot(order: InvoiceOrder, sellerName = 'کفش �
     orderId: order.id,
     orderCreatedAt: new Date(order.createdAt).toISOString(),
     items,
-    subtotal: items.reduce((total, item) => total + item.lineTotal, 0),
+    subtotal: order.subtotal ?? order.items.reduce((total, item) => total + (item.originalPrice ?? item.price) * item.quantity, 0),
+    ...(hasDiscountSnapshot ? {
+      productDiscount: order.productDiscount ?? 0,
+      couponDiscount: order.couponDiscount ?? 0,
+      couponCode: order.couponCode ?? null,
+      merchandiseTotal: order.total - order.shippingCost,
+    } : {}),
     shippingMethodName: order.shippingMethodName,
     shippingCost: order.shippingCost,
     total: order.total,

@@ -187,3 +187,29 @@ test('Leaving the profile aborts its account read and ignores a late response', 
   load.resolve(response(profile)); await settle()
   assert.equal(app.stateWrites, before)
 })
+
+test('Order details reconcile gross prices, product discounts and allocated coupon discounts', async () => {
+  const app = page({ 'GET /api/orders': [response([{
+    id: 'discount-order', createdAt: '2026-10-15T12:00:00Z', status: 'PROCESSING', verified: true,
+    total: 849, subtotal: 1000, productDiscount: 100, couponDiscount: 101, couponCode: 'PANIK101',
+    shippingCost: 50, shippingMethodName: 'پست', recipientName: null, address: 'نشانی',
+    items: [
+      { id: 'one', product: { name: 'مدل یک' }, originalPrice: 300, price: 270, quantity: 2, couponDiscount: 61, size: 38 },
+      { id: 'two', product: { name: 'مدل دو' }, originalPrice: 400, price: 360, quantity: 1, couponDiscount: 40, size: 39 },
+    ],
+  }])] })
+  await settle(); app.render()
+  nodes(app.tree).find(node => node.type === 'button' && text(node).startsWith('سفارش‌های من')).props.onClick()
+  app.render()
+  nodes(app.tree).find(node => node.type === 'button' && node.props['aria-expanded'] !== undefined).props.onClick()
+  app.render()
+  const rendered = text(app.tree)
+  assert.match(rendered, /جمع اولیهٔ کالاها1000 تومان/)
+  assert.match(rendered, /تخفیف محصولات−100 تومان/)
+  assert.match(rendered, /PANIK101/)
+  assert.match(rendered, /479 تومان/)
+  assert.match(rendered, /320 تومان/)
+  assert.match(rendered, /مجموع سفارش849 تومان/)
+  assert.deepEqual(nodes(app.tree).filter(node => node.type === 'del').map(text), ['600 تومان', '400 تومان'])
+  app.unmount()
+})

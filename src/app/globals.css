@@ -14,6 +14,59 @@
     outline: 2px solid rgb(var(--theme-brand, 18 102 74));
     outline-offset: 4px;
   }
+
+  /* Footer switches are square checkboxes; actual pill switches keep their own styling. */
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active), input[type='checkbox'][role='switch'][id^='settings-footer-']) {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-grid;
+    place-items: center;
+    width: 1em;
+    height: 1em;
+    flex-shrink: 0;
+    vertical-align: middle;
+    padding: 0;
+    border: 1.5px solid rgb(var(--theme-muted, 105 116 110) / .6);
+    border-radius: 5px;
+    background-color: white;
+    cursor: pointer;
+  }
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active), input[type='checkbox'][role='switch'][id^='settings-footer-'])::before {
+    content: '';
+    width: 62%;
+    height: 62%;
+    background-color: white;
+    clip-path: polygon(13% 45%, 0 58%, 38% 100%, 100% 17%, 87% 5%, 36% 74%);
+    opacity: 0;
+  }
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active):is(:checked, :indeterminate), input[type='checkbox'][role='switch'][id^='settings-footer-']:is(:checked, :indeterminate)) {
+    border-color: rgb(var(--theme-brand, 18 102 74));
+    background-color: rgb(var(--theme-brand, 18 102 74));
+  }
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active):is(:checked, :indeterminate), input[type='checkbox'][role='switch'][id^='settings-footer-']:is(:checked, :indeterminate))::before {
+    opacity: 1;
+  }
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active):indeterminate, input[type='checkbox'][role='switch'][id^='settings-footer-']:indeterminate)::before {
+    height: 2px;
+    border-radius: 1px;
+    clip-path: none;
+  }
+  :where(input[type='checkbox']:not([role='switch']):not(#shipping-active):disabled, input[type='checkbox'][role='switch'][id^='settings-footer-']:disabled) {
+    opacity: .5;
+    cursor: not-allowed;
+  }
+  @media (forced-colors: active) {
+    :where(input[type='checkbox']:not([role='switch']):not(#shipping-active), input[type='checkbox'][role='switch'][id^='settings-footer-']) {
+      appearance: auto;
+      -webkit-appearance: auto;
+      background-color: revert;
+      border: revert;
+      forced-color-adjust: auto;
+    }
+    :where(input[type='checkbox']:not([role='switch']):not(#shipping-active), input[type='checkbox'][role='switch'][id^='settings-footer-'])::before {
+      content: none;
+    }
+  }
 }
 
 @layer components {

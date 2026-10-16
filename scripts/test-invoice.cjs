@@ -85,3 +85,34 @@ test('Approval eligibility is independent from payment and excludes pending/canc
   for (const status of ['PROCESSING', 'SHIPPED', 'DELIVERED']) assert.equal(isInvoiceEligibleStatus(status), true)
   for (const status of ['PENDING', 'CANCELLED', 'paid', 'processing', '']) assert.equal(isInvoiceEligibleStatus(status), false)
 })
+
+test('Discounted invoice freezes gross prices, product discounts and exact per-line coupon allocations', () => {
+  const snapshot = plain(buildInvoiceSnapshot({
+    ...order, subtotal: 1000, productDiscount: 100, couponDiscount: 101, couponCode: 'PANIK101', shippingCost: 50, total: 849,
+    items: [
+      { ...order.items[0], originalPrice: 300, price: 270, quantity: 2, couponDiscount: 61 },
+      { ...order.items[1], originalPrice: 400, price: 360, quantity: 1, couponDiscount: 40 },
+    ],
+  }))
+  assert.equal(snapshot.schemaVersion, 1)
+  assert.equal(snapshot.subtotal, 1000)
+  assert.equal(snapshot.productDiscount, 100)
+  assert.equal(snapshot.couponDiscount, 101)
+  assert.equal(snapshot.couponCode, 'PANIK101')
+  assert.equal(snapshot.items[0].originalUnitPrice, 300)
+  assert.equal(snapshot.items[0].unitPrice, 270)
+  assert.equal(snapshot.items[0].productDiscount, 60)
+  assert.equal(snapshot.items[0].couponDiscount, 61)
+  assert.deepEqual(snapshot.items.map(item => item.lineTotal), [479, 320])
+  assert.equal(snapshot.items.reduce((sum, item) => sum + item.lineTotal, 0), snapshot.merchandiseTotal)
+  assert.equal(snapshot.subtotal - snapshot.productDiscount - snapshot.couponDiscount + snapshot.shippingCost, snapshot.total)
+  assert.equal(snapshot.merchandiseTotal + snapshot.shippingCost, snapshot.total)
+})
+
+test('Migrated legacy orders with null gross/base prices produce the identical schemaVersion1 snapshot', () => {
+  const original = plain(buildInvoiceSnapshot(order))
+  const migrated = plain(buildInvoiceSnapshot({ ...order, subtotal: null, productDiscount: 0, couponDiscount: 0, couponCode: null,
+    items: order.items.map(item => ({ ...item, originalPrice: null, couponDiscount: 0 })),
+  }))
+  assert.deepEqual(migrated, original)
+})

@@ -70,9 +70,8 @@ function page(queues = {}, options = {}) {
     '@/components/ui/PanikMark': { __esModule: true, default: 'PanikMark' },
     '@/components/admin/HomeHeroSettings': { __esModule: true, default: 'HomeHeroSettings' },
     '@/components/admin/FooterSettings': { __esModule: true, default: 'FooterSettings' },
-    '@/components/ui/EnhancedSelect': { __esModule: true, default: 'EnhancedSelect' },
+    '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
     '@/components/ui/SocialIcons': { EitaaIcon: 'EitaaIcon', InstagramIcon: 'InstagramIcon', TelegramIcon: 'TelegramIcon', WhatsAppIcon: 'WhatsAppIcon' },
-    './enhanced-select.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
     './footer-settings.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => key }) },
     '@/lib/site-settings-contract': contract.module.exports,
     '@/lib/admin-settings-sections': sectionContract.module.exports,
@@ -121,9 +120,8 @@ function page(queues = {}, options = {}) {
     clearTimeout(id) { timers.delete(id) },
     require(name) { assert.ok(name in dependencies, `Unexpected dependency ${name}`); return dependencies[name] },
   }
-  const selectContext = { ...context, module: { exports: {} } }
-  vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/components/ui/EnhancedSelect.tsx'), 'utf8'), { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, selectContext)
-  dependencies['@/components/ui/EnhancedSelect'].default = selectContext.module.exports.default
+  // Test settings and footer state through the shared select's public native
+  // contract. Desktop/mobile control rendering is covered separately.
   const footerContext = { ...context, module: { exports: {} } }
   vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/components/admin/FooterSettings.tsx'), 'utf8'), { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, footerContext)
   dependencies['@/components/admin/FooterSettings'].default = footerContext.module.exports.default

@@ -4,6 +4,8 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const pricingModule = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: pricingModule, Date })
 
 // Execute the real page handlers with hook and fetch doubles. No server or DB is contacted.
 const shoe = { id: 'shoe-1', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
@@ -80,21 +82,16 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     '@/components/layout/SiteSettingsProvider': { useSiteSettings: () => ({ storeName: 'کفش لند' }) },
     '@/components/shop/InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
     '@/components/admin/MultiImageInput': { __esModule: true, default: 'MultiImageInput' },
+    '@/components/ui/EnhancedSelect': { __esModule: true, default: props => jsx('select', { ...props, 'data-enhanced-select': true }) },
+    '@/components/ui/FormattedNumberInput': { __esModule: true, default: ({ onValueChange, ...props }) => jsx('input', { ...props, type: 'text', 'data-formatted-number': true, onChange: event => onValueChange(event.target.value) }) },
+    '@/components/ui/PersianDatePicker': { __esModule: true, default: ({ onChange, ...props }) => jsx('input', { ...props, type: 'text', 'data-persian-date': true, onChange: event => onChange(event.target.value) }) },
     '@/lib/utils': { formatPrice: (value) => String(value) },
+    '@/lib/pricing': pricingModule.exports,
     '@/components/shop/commerce.module.css': css,
     '@/components/admin/admin.module.css': css,
   }
-  const selectModule = { exports: {} }
-  const selectSource = readFileSync(path.join(__dirname, '..', 'src/components/ui/EnhancedSelect.tsx'), 'utf8')
-  vm.runInNewContext(transformSync(selectSource, { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' }).code, {
-    module: selectModule,
-    require(name) {
-      if (name.endsWith('.css')) return css
-      assert.ok(name in dependencies, 'Unexpected EnhancedSelect dependency ' + name)
-      return dependencies[name]
-    },
-  })
-  dependencies['@/components/ui/EnhancedSelect'] = selectModule.exports
+  // Exercise page selection handlers through the shared control's unchanged
+  // native change-event contract; its desktop/mobile rendering has its own suite.
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8')
   const { code } = transformSync(source, { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' })
   const context = {
@@ -537,6 +534,8 @@ test('Custom order dates remain drafts until a valid inclusive range is applied'
     '/api/admin/orders': [response(orderReport([order()])), response(orderReport([]))],
   } })
   await settle(); app.render()
+  assert.equal(nodes(app.tree).filter(node => node.props['data-persian-date']).length, 2)
+  assert.ok(!text(app.tree).includes('میلادی'))
   const field = (id) => find(app, (node) => node.props.id === id)
   field('orders-date-from').props.onChange({ target: { value: '2026-10-08' } })
   field('orders-date-to').props.onChange({ target: { value: '2026-10-01' } }); app.render()
@@ -703,4 +702,115 @@ test('Legacy catalog products without metrics retain their order and display zer
   assert.equal(cards(app)[0].props.product.ratingAverage, 0)
   assert.equal(cards(app)[0].props.product.ratingCount, 0)
   app.unmount()
+})
+
+test('Catalog price sorting and ranges use active sale prices, while scheduled and expired sales keep base prices', async () => {
+  const products = [
+    { ...shoe, id: 'active', price: 300000, salePrice: 50000 },
+    { ...shoe, id: 'regular', price: 100000 },
+    { ...shoe, id: 'future', price: 200000, salePrice: 10000, saleStartsAt: '2099-01-01T00:00:00Z' },
+    { ...shoe, id: 'expired', price: 400000, salePrice: 10000, saleEndsAt: '2000-01-01T00:00:00Z' },
+  ]
+  for (const [search, expected] of [
+    ['?sort=cheap', ['active', 'regular', 'future', 'expired']],
+    ['?sort=expensive', ['expired', 'future', 'regular', 'active']],
+    ['?min=40000&max=60000', ['active']],
+    ['?min=150000&max=250000', ['future']],
+  ]) {
+    const app = page(undefined, { search, queues: { '/api/products': [response(products)] } })
+    await settle(); app.render()
+    assert.deepEqual(cards(app).map(node => node.props.product.id), expected)
+    if (expected.includes('active')) {
+      const active = cards(app).find(node => node.props.product.id === 'active').props.product
+      assert.equal(active.price, 300000, 'Base prices are never replaced by the effective selling price')
+      assert.equal(active.salePrice, 50000)
+    }
+    app.unmount()
+  }
+})
+
+test('Admin loads scheduled discounts in local time, serializes UTC dates and can explicitly clear the sale', async () => {
+  const sale = { ...shoe, salePrice: 80000, saleStartsAt: '2026-10-15T10:00:00.000Z', saleEndsAt: '2026-10-15T12:00:00.000Z' }
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([sale])], 'PUT /api/products/shoe-1': [response(sale)] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+  assert.equal(nodes(app.tree).filter(node => node.props['data-formatted-number']).length, 3)
+  assert.equal(nodes(app.tree).filter(node => node.props['data-persian-date'] && node.props.includeTime).length, 2)
+  assert.equal(find(app, node => node.props.id === 'product-sale-price').props.value, '80000')
+  const start = find(app, node => node.props.id === 'product-sale-start').props.value
+  assert.equal(new Date(start).toISOString(), sale.saleStartsAt)
+  find(app, node => node.props.id === 'product-sale-price').props.onChange({ target: { value: '75000' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const saved = JSON.parse(app.requests.find(item => item.method === 'PUT').body)
+  assert.equal(saved.salePrice, 75000)
+  assert.equal(saved.saleStartsAt, sale.saleStartsAt)
+  assert.equal(saved.saleEndsAt, sale.saleEndsAt)
+  assert.deepEqual(saved.expectedPricing, { price: sale.price, salePrice: sale.salePrice, saleStartsAt: sale.saleStartsAt, saleEndsAt: sale.saleEndsAt })
+  app.unmount()
+
+  const clear = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([sale])], 'PUT /api/products/shoe-1': [response(shoe)] } })
+  await settle(); clear.render()
+  find(clear, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); clear.render()
+  find(clear, node => node.type === 'button' && text(node) === 'حذف تخفیف محصول').props.onClick(); clear.render()
+  await find(clear, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const cleared = JSON.parse(clear.requests.find(item => item.method === 'PUT').body)
+  assert.equal(cleared.salePrice, null)
+  assert.equal(cleared.saleStartsAt, null)
+  assert.equal(cleared.saleEndsAt, null)
+  assert.equal(Object.hasOwn(cleared, 'stock'), false)
+  clear.unmount()
+})
+
+test('Metadata-only edits omit pricing and preserve the exact stored discount timestamps', async () => {
+  const sale = { ...shoe, salePrice: 80000, saleStartsAt: '2026-10-15T10:00:32.123Z', saleEndsAt: '2026-10-15T12:00:45.999Z' }
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([sale])], 'PUT /api/products/shoe-1': [response(sale)] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const payload = JSON.parse(app.requests.find(item => item.method === 'PUT').body)
+  for (const key of ['price', 'salePrice', 'saleStartsAt', 'saleEndsAt', 'expectedPricing']) assert.equal(Object.hasOwn(payload, key), false)
+  app.unmount()
+})
+
+test('Admin pricing conflict requires explicit refresh and keeps other draft fields', async () => {
+  const fresh = { ...shoe, salePrice: 70000 }
+  const app = page('src/app/admin/products/page.tsx', { queues: {
+    'PUT /api/products/shoe-1': [response({ code: 'PRODUCT_PRICE_CHANGED', error: 'قیمت تغییر کرده است' }, 409), response(fresh)],
+    '/api/products/shoe-1': [response(fresh)],
+  } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+  find(app, node => node.props.id === 'product-sale-price').props.onChange({ target: { value: '80000' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
+  assert.equal(find(app, node => node.type === 'button' && node.props.type === 'submit').props.disabled, true)
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  assert.equal(app.requests.filter(item => item.method === 'PUT').length, 1)
+  await find(app, node => node.type === 'button' && text(node) === 'تازه‌سازی قیمت و تخفیف').props.onClick(); await settle(); app.render()
+  assert.equal(find(app, node => node.props.id === 'product-sale-price').props.value, '70000')
+  find(app, node => node.props.id === 'product-sale-price').props.onChange({ target: { value: '65000' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const payload = JSON.parse(app.requests.filter(item => item.method === 'PUT')[1].body)
+  assert.equal(payload.salePrice, 65000)
+  assert.equal(payload.expectedPricing.salePrice, 70000)
+  assert.equal(payload.description, shoe.description)
+  app.unmount()
+})
+
+test('Admin refuses invalid sale prices and reversed schedules without posting or discarding the draft', async () => {
+  for (const scenario of [
+    { price: '100000', start: '', end: '' }, { price: '0', start: '', end: '' },
+    { price: '80000', start: '2026-10-15T12:00', end: '2026-10-15T10:00' },
+  ]) {
+    const app = page('src/app/admin/products/page.tsx')
+    await settle(); app.render()
+    find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+    for (const [id, value] of [['product-sale-price', scenario.price], ['product-sale-start', scenario.start], ['product-sale-end', scenario.end]]) {
+      find(app, node => node.props.id === id).props.onChange({ target: { value } }); app.render()
+    }
+    await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
+    assert.equal(app.requests.filter(item => item.method === 'PUT').length, 0)
+    assert.ok(find(app, node => node.props.role === 'alert'))
+    assert.equal(find(app, node => node.props.id === 'product-sale-price').props.value, scenario.price)
+    app.unmount()
+  }
 })

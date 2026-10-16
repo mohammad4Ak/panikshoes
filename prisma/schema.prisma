@@ -20,6 +20,7 @@ model User {
   orders    Order[]
   addresses Address[]
   reviews   ProductReview[]
+  couponRedemptions CouponRedemption[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
@@ -50,6 +51,9 @@ model Product {
   slug        String      @unique
   description String
   price       Int
+  salePrice   Int?
+  saleStartsAt DateTime?
+  saleEndsAt  DateTime?
   images      String[]
   category    Category    @relation(fields: [categoryId], references: [id])
   categoryId  String
@@ -112,6 +116,13 @@ model Order {
   items              OrderItem[]
   invoice            Invoice?
   total              Int
+  subtotal           Int?
+  productDiscount    Int             @default(0)
+  couponDiscount     Int             @default(0)
+  coupon             Coupon?         @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponId           String?
+  couponCode         String?
+  couponRedemption   CouponRedemption?
   status             OrderStatus     @default(PENDING)
   recipientName      String?
   checkoutKey        String?         @unique
@@ -136,6 +147,7 @@ model Order {
   updatedAt          DateTime        @updatedAt
 
   @@index([shippingMethodId])
+  @@index([couponId])
   @@index([paymentMethod, paymentStatus, paymentExpiresAt])
 }
 
@@ -200,6 +212,47 @@ model OrderItem {
   size      Int
   color     String
   price     Int
+  originalPrice Int?
+  couponDiscount Int @default(0)
+}
+
+model Coupon {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  name         String
+  type         CouponType
+  value        Int
+  maxDiscount  Int?
+  minSubtotal  Int        @default(0)
+  maxUses      Int?
+  perUserLimit Int        @default(1)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  isActive     Boolean    @default(true)
+  // Includes unpaid reservations and paid uses; cancelled/expired uses are released.
+  usedCount    Int        @default(0)
+  version      Int        @default(1)
+  deletedAt    DateTime?
+  orders       Order[]
+  redemptions  CouponRedemption[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([deletedAt, isActive, createdAt])
+}
+
+model CouponRedemption {
+  id         String   @id @default(cuid())
+  coupon     Coupon   @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  couponId   String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId     String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId    String   @unique
+  releasedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([couponId, userId, releasedAt])
 }
 
 model Invoice {
@@ -260,6 +313,11 @@ enum SiteColorTheme {
 enum Role {
   USER
   ADMIN
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
 }
 
 enum ReviewStatus {

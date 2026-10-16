@@ -13,6 +13,8 @@ export default function CartPage() {
   const { items, removeItem, updateQuantity, getTotal } = useCart()
   const total = getTotal()
   const count = items.reduce((sum, item) => sum + item.quantity, 0)
+  const originalTotal = items.reduce((sum, item) => sum + Math.max(item.originalPrice ?? item.price, item.price) * item.quantity, 0)
+  const productDiscount = originalTotal - total
 
   if (items.length === 0) {
     return <div className={styles.page}>
@@ -42,7 +44,10 @@ export default function CartPage() {
           <div className={styles.cartCopy}>
             <h2><Link href={`/products/${encodeURIComponent(item.productId)}`}>{item.name}</Link></h2>
             <p><span>سایز {formatPrice(item.size)}</span><span>{item.color}</span></p>
-            <div className={styles.price}>{formatPrice(item.price)} <small>تومان</small></div>
+            <div className={styles.priceStack}>
+              {(item.originalPrice ?? item.price) > item.price && <del className={styles.originalPrice}>{formatPrice(item.originalPrice!)} تومان</del>}
+              <div className={styles.price}>{formatPrice(item.price)} <small>تومان</small></div>
+            </div>
           </div>
           <div className={styles.cartActions}>
             <button onClick={() => removeItem(item.productId, item.size, item.color)} aria-label={`حذف ${item.name}`} className={styles.remove}><Trash2 size={17} /></button>
@@ -58,10 +63,11 @@ export default function CartPage() {
       <aside className={styles.summary} aria-label="خلاصه سفارش">
         <h2>خلاصهٔ سفارش</h2>
         <div className={styles.summaryRow}><span>تعداد محصولات</span><strong>{formatPrice(count)} عدد</strong></div>
+        {productDiscount > 0 && <><div className={styles.summaryRow}><span>قیمت اصلی محصولات</span><strong>{formatPrice(originalTotal)} تومان</strong></div><div className={`${styles.summaryRow} ${styles.savings}`}><span>تخفیف محصولات</span><strong>{formatPrice(productDiscount)} تومان</strong></div></>}
         <div className={styles.summaryRow}><span>هزینهٔ ارسال</span><strong>در مرحلهٔ بعد محاسبه می‌شود</strong></div>
         <div className={styles.summaryTotal}><span>مجموع محصولات</span><span className={styles.price}>{formatPrice(total)} <small>تومان</small></span></div>
         <Link href="/checkout" className="btn-primary">ادامهٔ خرید <ArrowLeft size={18} /></Link>
-        <p className={styles.summaryNote}>در قدم بعد، آدرس و روش ارسال رو انتخاب کن.</p>
+        <p className={styles.summaryNote}>کد تخفیف را در مرحلهٔ بعد وارد کن. قیمت نهایی هنگام ثبت سفارش دوباره بررسی می‌شود.</p>
       </aside>
     </div>
   </div>

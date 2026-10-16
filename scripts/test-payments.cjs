@@ -15,6 +15,7 @@ function load(file, dependencies = {}) {
 const contract = load('src/lib/payment-contract.ts')
 const invoice = load('src/lib/invoice.ts')
 const requestOrigin = load('src/lib/request-origin.ts')
+const coupons = load('src/lib/coupons.ts')
 const clone = (value) => structuredClone(value)
 const submissionKey = '539fae5b-9916-4d2a-8afd-dff702bab432'
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFsoAAAAASUVORK5CYII=', 'base64')
@@ -113,9 +114,10 @@ function harness(options = {}) {
       return result
     } finally { unlock() }
   } : client(state)[property] })
-  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': requestOrigin })
+  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': requestOrigin, '@/lib/coupons': coupons })
   const dependencies = { 'next/server': { NextResponse: Response }, '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': { prisma }, '@/lib/payments': payments, '@/lib/payment-contract': contract, '@/lib/invoice': invoice,
+    '@/lib/coupons': coupons,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName: options.storeName ?? 'کفش لند' }) } }
   return { state: () => state, payments, asAdmin: () => { session = { user: { id: 'admin', role: 'ADMIN' } } },
     route: (file) => load(`src/app/api/${file}/route.ts`, dependencies) }

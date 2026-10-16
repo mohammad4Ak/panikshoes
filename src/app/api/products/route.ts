@@ -5,6 +5,7 @@ import { ApiInputError, apiError, readJsonObject } from '@/lib/api-input'
 import { productInput } from '@/lib/catalog-input'
 import { withProductRatings } from '@/lib/product-reviews'
 import { expireUnpaidOrders } from '@/lib/payments'
+import { productPricing } from '@/lib/pricing'
 
 export async function GET(request: Request) {
   await expireUnpaidOrders()
@@ -22,7 +23,8 @@ export async function GET(request: Request) {
     },
     include: { category: true }, orderBy: { createdAt: 'desc' },
   })
-  return NextResponse.json(await withProductRatings(products))
+  const now = new Date()
+  return NextResponse.json((await withProductRatings(products)).map(product => ({ ...product, ...productPricing(product, now) })))
 }
 
 export async function POST(request: Request) {

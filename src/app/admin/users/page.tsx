@@ -2,6 +2,7 @@
 
 import styles from '@/components/admin/admin.module.css'
 import { useSiteSettings } from '@/components/layout/SiteSettingsProvider'
+import EnhancedSelect from '@/components/ui/EnhancedSelect'
 
 import { useState, useEffect } from 'react'
 import { Shield, Trash2, Pencil, X, Plus, UserPlus, KeyRound } from 'lucide-react'
@@ -292,14 +293,14 @@ export default function AdminUsersPage() {
 
               <div>
                 <label className="block font-bold mb-2">نقش</label>
-                <select
+                <EnhancedSelect nativeAppearance
                   className="input-field"
                   value={form.role}
                   onChange={(e) => setForm({ ...form, role: e.target.value as 'USER' | 'ADMIN' })}
                 >
                   <option value="USER">کاربر</option>
                   <option value="ADMIN">مدیر</option>
-                </select>
+                </EnhancedSelect>
               </div>
 
               <div>
@@ -411,7 +412,7 @@ export default function AdminUsersPage() {
                 </div>
                 <div>
                   <label className="block font-bold mb-2">نقش</label>
-                  <select
+                  <EnhancedSelect nativeAppearance
                     className="input-field"
                     value={createForm.role}
                     onChange={(e) =>
@@ -420,7 +421,7 @@ export default function AdminUsersPage() {
                   >
                     <option value="USER">کاربر</option>
                     <option value="ADMIN">مدیر</option>
-                  </select>
+                  </EnhancedSelect>
                 </div>
               </div>
 

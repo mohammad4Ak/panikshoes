@@ -17,14 +17,14 @@
     "postinstall": "prisma generate",
     "test:shipping": "node --test scripts/test-shipping.cjs",
     "test:checkout-shipping": "node --test scripts/test-checkout-shipping.cjs",
-    "test:sales-report": "node --test scripts/test-sales-report.cjs",
+    "test:sales-report": "node --test scripts/test-sales-report.cjs scripts/test-admin-date-filters.cjs scripts/test-persian-inputs.cjs",
     "test:shop-motion": "node --test scripts/test-shop-motion.cjs",
     "test:account-catalog": "node --test scripts/test-account-catalog.cjs",
     "test:orders-business": "node --test scripts/test-orders-business.cjs",
     "test:catalog-ui": "node --test scripts/test-catalog-ui.cjs",
     "test:session-activity": "node --test scripts/test-session-activity.cjs",
-    "test": "node --test scripts/test-account-catalog.cjs scripts/test-catalog-ui.cjs scripts/test-checkout-shipping.cjs scripts/test-orders-auth.cjs scripts/test-orders-business.cjs scripts/test-payment-result.cjs scripts/test-sales-report.cjs scripts/test-shipping.cjs scripts/test-session-activity.cjs scripts/test-shop-motion.cjs scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-auth-ui.cjs scripts/test-profile-account-ui.cjs scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs scripts/test-request-origin.cjs scripts/test-auth-request-origin.cjs scripts/test-site-settings.cjs scripts/test-site-settings-ui.cjs scripts/test-site-settings-public.cjs scripts/test-site-settings-provider.cjs scripts/test-home-content.cjs scripts/test-admin-settings-navigation.cjs scripts/test-admin-orders.cjs scripts/test-product-reviews.cjs scripts/test-product-engagement-ui.cjs scripts/test-admin-reviews-ui.cjs scripts/test-analytics.cjs scripts/test-home-hero-settings.cjs scripts/test-home-hero-settings-ui.cjs scripts/test-home-hero-carousel.cjs",
-    "test:invoice": "node --test scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs",
+    "test": "node --test scripts/test-account-catalog.cjs scripts/test-catalog-ui.cjs scripts/test-checkout-shipping.cjs scripts/test-orders-auth.cjs scripts/test-orders-business.cjs scripts/test-payment-result.cjs scripts/test-sales-report.cjs scripts/test-shipping.cjs scripts/test-session-activity.cjs scripts/test-shop-motion.cjs scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-auth-ui.cjs scripts/test-profile-account-ui.cjs scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs scripts/test-request-origin.cjs scripts/test-auth-request-origin.cjs scripts/test-site-settings.cjs scripts/test-site-settings-ui.cjs scripts/test-site-settings-public.cjs scripts/test-site-settings-provider.cjs scripts/test-home-content.cjs scripts/test-admin-settings-navigation.cjs scripts/test-admin-orders.cjs scripts/test-product-reviews.cjs scripts/test-product-engagement-ui.cjs scripts/test-admin-reviews-ui.cjs scripts/test-analytics.cjs scripts/test-home-hero-settings.cjs scripts/test-home-hero-settings-ui.cjs scripts/test-home-hero-carousel.cjs scripts/test-discounts-core.cjs scripts/test-order-discounts.cjs scripts/test-checkout-quote.cjs scripts/test-discount-accounting.cjs scripts/test-admin-coupons-ui.cjs scripts/test-admin-date-filters.cjs scripts/test-persian-inputs.cjs scripts/test-enhanced-select.cjs",
+    "test:invoice": "node --test scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-discount-accounting.cjs",
     "test:payments": "node --test scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs",
     "test:payments:db": "node scripts/test-payments-db.cjs",
     "test:lan": "node --test scripts/test-request-origin.cjs scripts/test-auth-request-origin.cjs",
@@ -35,7 +35,11 @@
     "test:product-engagement:db": "node --env-file=.env scripts/test-product-engagement-db.cjs",
     "test:analytics": "node --test scripts/test-analytics.cjs",
     "test:home-hero": "node --test scripts/test-home-hero-settings.cjs scripts/test-home-hero-settings-ui.cjs scripts/test-home-hero-carousel.cjs",
-    "test:home-hero:db": "node --env-file=.env scripts/test-home-hero-settings-db.cjs"
+    "test:home-hero:db": "node --env-file=.env scripts/test-home-hero-settings-db.cjs",
+    "test:discounts": "node --test scripts/test-discounts-core.cjs scripts/test-order-discounts.cjs scripts/test-checkout-quote.cjs scripts/test-discount-accounting.cjs scripts/test-admin-coupons-ui.cjs",
+    "test:discounts:db": "node --env-file=.env scripts/test-discounts-db.cjs",
+    "test:persian-inputs": "node --test scripts/test-persian-inputs.cjs scripts/test-admin-date-filters.cjs scripts/test-admin-coupons-ui.cjs scripts/test-catalog-ui.cjs",
+    "test:select": "node --test scripts/test-enhanced-select.cjs"
   },
   "keywords": [
     "فروشگاه",
@@ -48,6 +52,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
     "@prisma/client": "^6.19.3",
+    "@radix-ui/react-select": "2.4.1",
     "@vercel/blob": "^2.8.0",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
@@ -57,7 +62,9 @@
     "next-auth": "^5.0.0-beta.32",
     "prisma": "^6.19.3",
     "react": "^19.2.8",
+    "react-date-object": "2.1.9",
     "react-dom": "^19.2.8",
+    "react-multi-date-picker": "4.5.2",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"

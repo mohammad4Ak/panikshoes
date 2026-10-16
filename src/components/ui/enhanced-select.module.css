@@ -46,5 +46,29 @@
 .hasIcon .select { padding-inline-start: 43px; }
 .compact { width: auto; max-width: 100%; }
 .compact .select { min-width: 185px; min-height: 44px; border-radius: 999px; font-size: 11px; }
-@media (prefers-reduced-motion: reduce) { .select { transition: none; } }
+.trigger { position: relative; display: inline-flex; align-items: center; text-align: start; }
+.trigger[data-state='open'] { background: white; border-color: rgb(var(--theme-brand, 18 102 74) / .55); box-shadow: 0 0 0 3px rgb(var(--theme-brand, 18 102 74) / .06); }
+.value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chevron { transition: transform .2s ease; }
+.trigger[data-state='open'] .chevron { transform: translateY(-50%) rotate(180deg); }
+.small { width: auto; }
+.small .trigger { min-width: 60px; min-height: 34px; padding: 7px 11px; padding-inline-end: 31px; border-radius: 12px; font-size: 11px; }
+.small .chevron { inset-inline-end: 10px; width: 13px; }
+.proxy { position: absolute !important; width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important; padding: 0 !important; margin: -1px !important; border: 0 !important; overflow: hidden !important; clip-path: inset(50%) !important; white-space: nowrap !important; opacity: 0 !important; pointer-events: none !important; }
+.content { z-index: 220; min-width: var(--radix-select-trigger-width); max-width: min(420px, calc(100vw - 24px)); max-height: var(--radix-select-content-available-height); overflow: hidden; padding: 6px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 20px; background: #fffffff7; backdrop-filter: blur(16px); color: rgb(var(--theme-ink, 20 33 28)); box-shadow: 0 18px 45px rgb(var(--theme-ink, 20 33 28) / .1), 0 3px 9px rgb(var(--theme-ink, 20 33 28) / .04); transform-origin: var(--radix-select-content-transform-origin); font-family: inherit; animation: menuEnter .18s cubic-bezier(.2,.75,.3,1); }
+.content[data-state='closed'] { animation: menuLeave .12s ease-in; }
+.viewport { max-height: min(320px, calc(var(--radix-select-content-available-height) - 42px)); padding: 2px; scrollbar-width: thin; }
+.item { position: relative; display: flex; align-items: center; min-height: 39px; padding: 9px 12px; padding-inline-end: 38px; margin: 2px 0; border-radius: 12px; font-size: 12px; font-weight: 500; line-height: 1.7; cursor: pointer; user-select: none; outline: none; transition: background .13s ease, color .13s ease; animation: itemEnter .16s ease backwards; }
+.item > span:first-child { overflow-wrap: anywhere; }
+.item[data-state='checked'] { background: rgb(var(--theme-brand-soft, 234 243 238) / .7); color: rgb(var(--theme-brand, 18 102 74)); font-weight: 700; }
+.item[data-highlighted] { background: rgb(var(--theme-brand-soft, 234 243 238)); color: rgb(var(--theme-brand-strong, 12 80 58)); }
+.item[data-disabled] { opacity: .4; cursor: not-allowed; animation: none; }
+.indicator { position: absolute; inset-inline-end: 12px; display: grid; place-items: center; color: rgb(var(--theme-brand, 18 102 74)); }
+.groupLabel { padding: 8px 12px 4px; color: rgb(var(--theme-muted, 105 116 110)); font-size: 10px; font-weight: 600; }
+.scrollButton { display: flex; align-items: center; justify-content: center; height: 22px; color: rgb(var(--theme-brand, 18 102 74)); cursor: default; }
+.error { position: absolute; inset-inline-start: 0; top: 100%; margin-top: 5px; color: #a33e3e; font-size: 10px; white-space: nowrap; }
+@keyframes menuEnter { from { opacity: 0; transform: translateY(-5px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes menuLeave { to { opacity: 0; transform: translateY(-3px) scale(.99); } }
+@keyframes itemEnter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .select, .chevron, .item { transition: none; } .content, .content[data-state='closed'], .item { animation: none; } }
 @media (forced-colors: active) { .select { border: 1px solid ButtonText; } }
