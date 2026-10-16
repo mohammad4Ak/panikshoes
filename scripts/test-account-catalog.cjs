@@ -4,6 +4,7 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const { memoryInventory } = require('./helpers/inventory-memory.cjs')
 
 const root = path.join(__dirname, '..')
 const admin = { user: { id: 'admin', role: 'ADMIN' } }
@@ -19,9 +20,13 @@ const pricingSnapshot = row => ({ price: row.price, salePrice: row.salePrice ?? 
 function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now = () => Date.now() } = {}) {
   const cache = new Map()
   let authConfig
+  // Metadata/pricing tests perform one update and inspect its exact guard. Their
+  // old delegates need the API's transaction boundary; inventory atomicity uses
+  // the real rollback-capable memory adapter below and in test-inventory.cjs.
+  const database = prisma.$transaction ? prisma : { ...prisma, $transaction: callback => callback(prisma) }
   const dependencies = {
     'next/server': { NextResponse: Response },
-    '@/lib/prisma': { prisma }, './prisma': { prisma },
+    '@/lib/prisma': { prisma: database }, './prisma': { prisma: database },
     '@/lib/auth': { auth: async () => session },
     '@/lib/payments': { expireUnpaidOrders: async () => 0 },
     'bcryptjs': { hash: async () => 'hash', compare: async () => true, ...bcrypt },
@@ -323,19 +328,24 @@ for (const body of invalidProductValues) {
   test(`Product create/update rejects invalid business value before DB access: ${JSON.stringify(body)}`, async () => {
     const { handlers: create } = load('src/app/api/products/route.ts')
     const { handlers: update } = load('src/app/api/products/[id]/route.ts')
-    assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', ...body }))).status, 400)
+    assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', variants: [], ...body }))).status, 400)
     assert.equal((await update.PUT(request(body), context())).status, 400)
   })
 }
 
 test('Valid numeric form values normalize without turning false into true', async () => {
   let written
+  const inventory = memoryInventory({ products: [] })
   const { handlers } = load('src/app/api/products/route.ts', { prisma: {
     category: { findUnique: async () => ({ id: 'cat' }) },
-    product: { create: async (query) => { written = query.data; return { id: 'new', ...query.data } } },
+    $transaction: callback => inventory.prisma.$transaction(tx => callback({ ...tx, product: { ...tx.product, create: async query => {
+      written = query.data
+      return tx.product.create({ ...query, data: { inventoryVersion: 0, inventoryConfigured: false, stock: 0, ...query.data } })
+    } } })),
   } })
-  const response = await handlers.POST(request({ name: ' Name ', price: '100', categoryId: 'cat', stock: '0',
-    sizes: ['40', 40, 41], colors: [' black ', 'black'], images: [], featured: false }))
+  const response = await handlers.POST(request({ name: ' Name ', price: '100', categoryId: 'cat',
+    sizes: ['40', 40, 41], colors: [' black ', 'black'], images: [], featured: false,
+    variants: [{ size: '40', color: ' black ', stock: '2' }, { size: 41, color: 'black', stock: 0 }] }))
   assert.equal(response.status, 201)
   assert.equal(written.price, 100)
   assert.equal(written.stock, 0)
@@ -343,25 +353,17 @@ test('Valid numeric form values normalize without turning false into true', asyn
   assert.deepEqual(Array.from(written.sizes), [40, 41])
   assert.deepEqual(Array.from(written.colors), ['black'])
   assert.equal(written.images.length, 1)
+  const saved = await response.json()
+  assert.equal(saved.stock, 2)
+  assert.equal(saved.inventoryConfigured, true)
+  assert.deepEqual(saved.variants.map(row => row.stock), [2, 0])
 })
 
-test('Stocked products require a size using merged existing and updated values', async () => {
+test('New products require explicit complete variant rows rather than an aggregate stock', async () => {
   const { handlers: create } = load('src/app/api/products/route.ts')
   assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', stock: 1, sizes: [] }))).status, 400)
-  for (const scenario of [
-    { existing: { stock: 5, sizes: [41] }, body: { sizes: [] }, expected: 400 },
-    { existing: { stock: 0, sizes: [] }, body: { stock: 2, expectedStock: 0 }, expected: 400 },
-    { existing: { stock: 0, sizes: [] }, body: { stock: 2, sizes: [42], expectedStock: 0 }, expected: 200 },
-    { existing: { stock: 5, sizes: [41], price: 100 }, body: { price: 200, expectedPricing: pricingSnapshot({ price: 100 }) }, expected: 200 },
-  ]) {
-    let updates = 0
-    const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
-      findUnique: async () => scenario.existing,
-      update: async () => { updates++; return { id: 'target' } },
-    } } })
-    assert.equal((await handlers.PUT(request(scenario.body), context())).status, scenario.expected)
-    assert.equal(updates, scenario.expected === 200 ? 1 : 0)
-  }
+  assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: [] }))).status, 400)
+  assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: ['black'], variants: [] }))).status, 400)
 })
 
 test('Product sale creation rejects invalid money and calendar schedules before writing', async () => {
@@ -375,7 +377,7 @@ test('Product sale creation rejects invalid money and calendar schedules before 
     { saleStartsAt: '2026-10-15T10:00:00Z' },
   ]) {
     const { handlers } = load('src/app/api/products/route.ts')
-    assert.equal((await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'cat', ...sale }))).status, 400, JSON.stringify(sale))
+    assert.equal((await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'cat', variants: [], ...sale }))).status, 400, JSON.stringify(sale))
   }
 })
 
@@ -447,60 +449,63 @@ test('Pricing writes require a complete valid original snapshot', async () => {
   assert.equal(writes, 0)
 })
 
-test('Stale admin inventory edits never restore stock consumed by a checkout', async () => {
+test('Direct aggregate stock writes are rejected even with a legacy optimistic stock token', async () => {
   let writes = 0
   const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
     findUnique: async () => ({ stock: 7, sizes: [42] }),
     update: async () => { writes++; return {} },
   } } })
-  const result = await handlers.PUT(request({ name: 'Renamed shoe', stock: 10, expectedStock: 8 }), context())
-  assert.equal(result.status, 409)
-  assert.equal((await result.json()).code, 'PRODUCT_STOCK_CHANGED')
+  for (const stock of [0, 10, '10']) {
+    const result = await handlers.PUT(request({ name: 'Renamed shoe', stock, expectedStock: 8 }), context())
+    assert.equal(result.status, 400)
+    assert.match((await result.json()).error, /هر رنگ و سایز/)
+  }
   assert.equal(writes, 0)
 })
 
-test('Inventory writes require a valid previous count, while metadata edits preserve current inventory', async () => {
-  const row = { id: 'target', stock: 7, sizes: [42], name: 'Original' }
+test('Metadata edits preserve current inventory counts, dimensions and version', async () => {
+  const row = { id: 'target', stock: 7, sizes: [42], colors: ['black'], inventoryConfigured: true, inventoryVersion: 12,
+    variants: [{ id: 'variant', size: 42, color: 'black', stock: 7, isActive: true }], name: 'Original' }
   let writes = 0
   const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
     findUnique: async () => ({ ...row }),
     update: async ({ data }) => { writes++; return Object.assign(row, data) },
   } } })
-  for (const expectedStock of [undefined, null, -1, 1.5, 'invalid']) {
-    assert.equal((await handlers.PUT(request({ stock: 9, expectedStock }), context())).status, 400)
-  }
   assert.equal(writes, 0)
   assert.equal((await handlers.PUT(request({ name: 'Renamed shoe' }), context())).status, 200)
   assert.equal(row.stock, 7)
   assert.equal(row.name, 'Renamed shoe')
-  assert.equal((await handlers.PUT(request({ stock: 9, expectedStock: 7 }), context())).status, 200)
-  assert.equal(row.stock, 9)
+  assert.equal(row.inventoryVersion, 12)
+  assert.deepEqual(row.sizes, [42])
+  assert.deepEqual(row.colors, ['black'])
+  assert.equal(row.variants[0].stock, 7)
+  assert.equal(writes, 1)
 })
 
-test('A checkout racing after the inventory read is caught atomically without partial metadata writes', async () => {
-  for (const body of [{ stock: 10, expectedStock: 8, name: 'New name' }, { sizes: [], name: 'New name' }]) {
-    const row = { stock: body.stock === undefined ? 0 : 8, sizes: [42], name: 'Original' }
+test('Changing size or color dimensions requires the complete matrix before any metadata write', async () => {
+  for (const body of [{ sizes: [], name: 'New name' }, { sizes: [41], name: 'New name' }, { colors: ['red'], name: 'New name' }]) {
+    const row = { stock: 8, sizes: [42], colors: ['black'], name: 'Original' }
+    let writes = 0
     const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
       findUnique: async () => ({ ...row }),
-      update: async ({ where, data }) => {
-        // Simulate checkout/reservation release after validation but before UPDATE.
-        row.stock += body.stock === undefined ? 1 : -1
-        if (where.stock !== undefined && where.stock !== row.stock) throw { code: 'P2025' }
-        return Object.assign(row, data)
-      },
+      update: async ({ data }) => { writes++; return Object.assign(row, data) },
     } } })
     const result = await handlers.PUT(request(body), context())
-    assert.equal(result.status, 409)
-    assert.equal((await result.json()).code, 'PRODUCT_STOCK_CHANGED')
-    assert.equal(row.stock, body.stock === undefined ? 1 : 7)
+    assert.equal(result.status, 400)
+    assert.match((await result.json()).error, /جدول موجودی/)
+    assert.equal(row.stock, 8)
     assert.equal(row.name, 'Original')
     assert.deepEqual(row.sizes, [42])
+    assert.deepEqual(row.colors, ['black'])
+    assert.equal(writes, 0)
   }
 })
 
 test('Unknown product category is rejected; unavailable category deletion is 404', async () => {
   const { handlers } = load('src/app/api/products/route.ts', { prisma: { category: { findUnique: async () => null } } })
-  assert.equal((await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'gone' }))).status, 400)
+  const missingCategory = await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'gone', variants: [] }))
+  assert.equal(missingCategory.status, 400)
+  assert.match((await missingCategory.json()).error, /دسته بندی نامعتبر/)
   const { handlers: category } = load('src/app/api/categories/[id]/route.ts', {
     prisma: { $transaction: async (operation) => operation({ category: { findUnique: async () => null } }) },
   })

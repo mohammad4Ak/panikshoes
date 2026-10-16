@@ -25,11 +25,11 @@ export default async function HomePage() {
   await expireUnpaidOrders()
   const [products, heroProduct, categories, settings, shippingMethods, paymentCandidates] = await Promise.all([
     prisma.product.findMany({
-      where: { stock: { gt: 0 } }, include: { category: true },
+      where: { inventoryConfigured: true, stock: { gt: 0 } }, include: { category: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], take: 4,
     }),
     prisma.product.findFirst({
-      where: { stock: { gt: 0 }, category: { slug: 'sneaker' }, NOT: { images: { isEmpty: true } } },
+      where: { inventoryConfigured: true, stock: { gt: 0 }, category: { slug: 'sneaker' }, NOT: { images: { isEmpty: true } } },
       include: { category: { select: { name: true } } },
       orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
     }),

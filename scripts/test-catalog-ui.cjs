@@ -8,7 +8,7 @@ const pricingModule = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: pricingModule, Date })
 
 // Execute the real page handlers with hook and fetch doubles. No server or DB is contacted.
-const shoe = { id: 'shoe-1', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
+const shoe = { id: 'shoe-1', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, inventoryConfigured: true, inventoryVersion: 1, variants: [{ id: 'variant-1', size: 42, color: 'سبز', stock: 5, isActive: true }], sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
 const category = { id: 'cat-1', name: 'کتانی', slug: 'sneaker', image: null, _count: { products: 0 } }
 const user = { id: 'user-1', name: 'مشتری نمونه', email: 'customer@example.test', phone: null, role: 'USER', _count: { orders: 1 } }
 const order = (overrides = {}) => ({ id: 'order-pending', total: 150000, shippingMethodName: 'پست پیشتاز', shippingCost: 50000, status: 'PENDING', verified: false, recipientName: 'گیرنده نمونه', address: 'نشانی نمونه', phone: '09123456789', createdAt: '2026-10-01T08:00:00Z', user: { name: user.name, email: user.email }, items: [{ id: 'line-1', quantity: 1, size: 42, color: 'سبز', price: 100000, product: { name: shoe.name } }], ...overrides })
@@ -148,15 +148,15 @@ test('Renaming a product does not resend the stale stock shown when the edit mod
 
 test('An intentional inventory edit carries its original count and conflict recovery preserves other changes', async () => {
   const app = page('src/app/admin/products/page.tsx', { queues: {
-    'PUT /api/products/shoe-1': [response({ code: 'PRODUCT_STOCK_CHANGED', error: 'موجودی تغییر کرده است' }, 409), response(shoe)],
-    'GET /api/products/shoe-1': [response({ ...shoe, stock: 4 })],
+    'PUT /api/products/shoe-1': [response({ code: 'PRODUCT_INVENTORY_CHANGED', error: 'موجودی تغییر کرده است' }, 409), response(shoe)],
+    'GET /api/products/shoe-1': [response({ ...shoe, stock: 4, inventoryVersion: 2, variants: [{ ...shoe.variants[0], stock: 4 }] })],
   } })
   await settle(); app.render()
   find(app, (node) => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
   find(app, (node) => node.type === 'input' && node.props.value === shoe.name).props.onChange({ target: { value: 'New product name' } }); app.render()
   find(app, (node) => node.type === 'input' && node.props.value === String(shoe.stock)).props.onChange({ target: { value: '9' } }); app.render()
   await find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
-  assert.deepEqual(JSON.parse(app.requests.find((item) => item.method === 'PUT').body).expectedStock, 5)
+  assert.equal(JSON.parse(app.requests.find((item) => item.method === 'PUT').body).expectedInventoryVersion, 1)
   assert.equal(find(app, (node) => node.type === 'button' && node.props.type === 'submit').props.disabled, true)
   await find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
   assert.equal(app.requests.filter((item) => item.method === 'PUT').length, 1)
@@ -168,8 +168,10 @@ test('An intentional inventory edit carries its original count and conflict reco
   freshStock.props.onChange({ target: { value: '8' } }); app.render()
   await find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
   const saved = JSON.parse(app.requests.filter((item) => item.method === 'PUT').at(-1).body)
-  assert.equal(saved.stock, 8)
-  assert.equal(saved.expectedStock, 4)
+  assert.deepEqual(saved.variants, [{ size: 42, color: 'سبز', stock: 8 }])
+  assert.equal(saved.expectedInventoryVersion, 2)
+  assert.equal(Object.hasOwn(saved, 'stock'), false)
+  assert.equal(Object.hasOwn(saved, 'expectedStock'), false)
   assert.equal(saved.name, 'New product name')
   app.unmount()
 })

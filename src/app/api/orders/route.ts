@@ -9,6 +9,7 @@ import { PAYMENT_WINDOW_MS } from '@/lib/payment-contract'
 import { isSameOriginRequest } from '@/lib/request-origin'
 import { allocateDiscount, productPricing } from '@/lib/pricing'
 import { CouponError, normalizeCouponCode, quoteCoupon, reserveCoupon } from '@/lib/coupons'
+import { InventoryError, inventoryKey, reserveInventory } from '@/lib/inventory'
 
 export async function GET() {
   const session = await auth()
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
     if (typeof item.productId !== 'string' || !item.productId.trim() || item.productId.length > 128 ||
         typeof item.quantity !== 'number' || !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > MAX_SHIPPING_AMOUNT ||
         typeof item.size !== 'number' || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > MAX_SHIPPING_AMOUNT ||
-        (item.color != null && (typeof item.color !== 'string' || item.color.length > 80))) {
+        (item.color != null && (typeof item.color !== 'string' || item.color.length > 100))) {
       return NextResponse.json({ error: 'مشخصات یا تعداد محصول معتبر نیست' }, { status: 400 })
     }
     const productId = item.productId.trim()
@@ -258,20 +259,8 @@ export async function POST(request: Request) {
       const allocated = allocateDiscount(orderItemsData.map((item) => item.price * item.quantity), coupon.discount)
       orderItemsData.forEach((item, index) => { item.couponDiscount = allocated[index] })
 
-      // Keep atomic stock protection; any failure rolls back the entire order.
-      for (const [productId, quantity] of [...requestedQuantities].sort(([left], [right]) => left.localeCompare(right))) {
-        const decremented = await tx.product.updateMany({
-          where: { id: productId, stock: { gte: quantity } },
-          data: { stock: { decrement: quantity } },
-        })
-        if (decremented.count === 0) {
-          const current = await tx.product.findUnique({ where: { id: productId } })
-          throw new OrderError('متأسفیم، موجودی یکی از محصولات در حین ثبت سفارش تمام شد یا برای تعداد انتخاب‌شده کافی نیست.', {
-            status: 409, code: 'STOCK_UNAVAILABLE', outOfStock: [productId],
-            outOfStockDetails: [{ productId, name: products.get(productId)?.name ?? 'محصول', availableQuantity: current?.stock ?? 0 }],
-          })
-        }
-      }
+      const reservedVariants = await reserveInventory(tx, items)
+      const reservedItems = orderItemsData.map(item => ({ ...item, variantId: reservedVariants.get(inventoryKey(item.productId, item.size, item.color))! }))
 
       const created = await tx.order.create({
         data: {
@@ -283,7 +272,7 @@ export async function POST(request: Request) {
           paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
           paymentCardNumber: paymentMethod.cardNumber, paymentCardholderName: paymentMethod.cardholderName,
           paymentBankName: paymentMethod.bankName,
-          items: { create: orderItemsData },
+          items: { create: reservedItems },
         },
         include: { items: true, invoice: { select: { id: true, issuedAt: true } } },
       })
@@ -313,6 +302,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
     if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
+    if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code, ...error.details,
+      outOfStock: error.details.outOfStockDetails?.map(item => item.productId) }, { status: error.status })
     // A method may be deleted after it was read but before the order's FK is written.
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2003' &&
         'meta' in error && error.meta && typeof error.meta === 'object' && 'field_name' in error.meta &&

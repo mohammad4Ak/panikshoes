@@ -4,6 +4,7 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const inventory = require('./helpers/inventory-double.cjs')
 
 // Exercise production logic with isolated dependencies. This suite never connects to PostgreSQL.
 function loadModule(relativePath, dependencies = {}) {
@@ -114,6 +115,7 @@ function loadRoute(relativePath, { session = { user: { id: 'admin-1', role: 'ADM
     '@/lib/prisma': { prisma },
     '@/lib/shipping': shipping,
     '@/lib/pricing': pricing, '@/lib/coupons': coupons,
+    '@/lib/inventory': inventory,
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
 }

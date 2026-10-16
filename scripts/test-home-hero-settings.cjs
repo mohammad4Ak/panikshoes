@@ -21,7 +21,7 @@ const clone = (value) => structuredClone(value)
 const plain = (value) => JSON.parse(JSON.stringify(value))
 const values = (overrides = {}) => ({ ...clone(contract.defaultSiteSettings), version: 1, ...overrides })
 const product = (id, overrides = {}) => ({
-  id, name: 'کفش ' + id, slug: id, images: ['/uploads/' + id + '.png'], stock: 3, sizes: [38, 39], price: 1900000,
+  id, name: 'کفش ' + id, slug: id, images: ['/uploads/' + id + '.png'], stock: 3, inventoryConfigured: true, sizes: [38, 39], price: 1900000,
   category: { name: 'رسمی', slug: 'formal' }, createdAt: new Date('2026-10-01T00:00:00Z'), featured: false,
   ...overrides,
 })
@@ -397,6 +397,7 @@ test('Automatic homepage mode keeps one featured sneaker and ignores unavailable
   const showcase = carousel(await fixture.render())
   assert.deepEqual(plain(showcase.props.products.map((entry) => entry.id)), ['old-featured'])
   assert.equal(fixture.calls.some((call) => call.where?.id?.in), false)
+  assert.equal(fixture.calls.find(call => call.operation === 'findFirst').where.inventoryConfigured, true)
 })
 
 test('Deleted explicit products return the actual automatic fallback instead of a stale link', async () => {

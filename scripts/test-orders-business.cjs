@@ -4,9 +4,11 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const inventory = require('./helpers/inventory-double.cjs')
 
 // These tests run the real routes against isolated transactional state. They never
 // connect to the database, create a live order, or invoke a payment provider.
+// Inventory uses a shared transport double; its variant algorithm has a separate suite.
 function load(file, dependencies = {}) {
   const source = readFileSync(path.join(__dirname, '..', file), 'utf8')
   const context = { module: { exports: {} }, require: (name) => {
@@ -92,6 +94,7 @@ function createHarness({ products = [product], selectedPaymentMethod = paymentMe
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true }, '@/lib/prisma': { prisma },
     '@/lib/auth': { auth: async () => session }, '@/lib/shipping': shipping,
     '@/lib/pricing': pricing, '@/lib/coupons': coupons,
+    '@/lib/inventory': inventory,
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
   return { post: (value) => route.POST(request(value)), committed, reads, mutations }
@@ -445,6 +448,7 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true }, '@/lib/prisma': { prisma }, '@/lib/auth': { auth: async () => session },
     '@/lib/invoice': invoice,
     '@/lib/coupons': coupons,
+    '@/lib/inventory': inventory,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName }) },
   })
   const params = { params: Promise.resolve({ id: 'order' }) }

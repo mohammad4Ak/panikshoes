@@ -5,6 +5,7 @@ import { buildInvoiceSnapshot, isInvoiceEligibleStatus } from '@/lib/invoice'
 import { isSameOriginRequest } from '@/lib/request-origin'
 import { readSiteSettings } from '@/lib/site-settings'
 import { CouponError, reacquireCouponReservation, releaseCouponReservation } from '@/lib/coupons'
+import { InventoryError, releaseInventory, reserveInventory } from '@/lib/inventory'
 
 const validStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const
 type OrderStatus = typeof validStatuses[number]
@@ -21,13 +22,6 @@ class StatusError extends Error {
 
 function isStatus(value: unknown): value is OrderStatus {
   return typeof value === 'string' && validStatuses.includes(value as OrderStatus)
-}
-
-function quantities(items: { productId: string; quantity: number }[]) {
-  const totals = new Map<string, number>()
-  for (const item of items) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
-  // All order mutations lock product rows in the same order to avoid deadlocks.
-  return [...totals].sort(([left], [right]) => left.localeCompare(right))
 }
 
 export async function PATCH(
@@ -91,21 +85,10 @@ export async function PATCH(
       if (changed.count !== 1) throw new StatusError('وضعیت سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه کنید')
 
       if (nextStatus === 'CANCELLED') {
-        for (const [productId, quantity] of quantities(existing.items)) {
-          await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
-        }
+        await releaseInventory(tx, existing.items)
         if (existing.couponId && !existing.verified) await releaseCouponReservation(tx, id, new Date())
       } else if (existing.status === 'CANCELLED') {
-        for (const [productId, quantity] of quantities(existing.items)) {
-          const decremented = await tx.product.updateMany({
-            where: { id: productId, stock: { gte: quantity } },
-            data: { stock: { decrement: quantity } },
-          })
-          if (decremented.count === 0) {
-            const product = await tx.product.findUnique({ where: { id: productId }, select: { name: true } })
-            throw new StatusError(`موجودی «${product?.name ?? 'محصول'}» برای بازگشایی سفارش کافی نیست`)
-          }
-        }
+        await reserveInventory(tx, existing.items, { allowLegacy: true })
         if (existing.couponId && !existing.verified) await reacquireCouponReservation(tx, id, existing.userId, new Date())
       }
 
@@ -124,6 +107,7 @@ export async function PATCH(
     return NextResponse.json(order)
   } catch (error) {
     if (error instanceof StatusError) return NextResponse.json({ error: error.message }, { status: error.status })
+    if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status })
     if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return NextResponse.json({ error: 'خطا در تغییر وضعیت' }, { status: 500 })
   }
@@ -159,9 +143,7 @@ export async function DELETE(
       if (claimed.count !== 1) throw new StatusError('وضعیت سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه کنید')
 
       if (order.status !== 'CANCELLED') {
-        for (const [productId, quantity] of quantities(order.items)) {
-          await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
-        }
+        await releaseInventory(tx, order.items)
       }
 
       if (order.couponId) await releaseCouponReservation(tx, id, new Date())
@@ -172,6 +154,7 @@ export async function DELETE(
     return NextResponse.json({ success: true })
   } catch (error) {
     if (error instanceof StatusError) return NextResponse.json({ error: error.message }, { status: error.status })
+    if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status })
     if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return NextResponse.json({ error: 'خطا در حذف سفارش' }, { status: 500 })
   }

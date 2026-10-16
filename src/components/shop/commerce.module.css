@@ -140,3 +140,6 @@
 .saleLine { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .salePill { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; background: rgb(var(--theme-brand-soft, 234 243 238)); color: rgb(var(--theme-brand, 18 102 74)); font-size: 10px; font-weight: 700; }
 .savings { color: rgb(var(--theme-brand, 18 102 74)); }
+.choice:disabled { opacity: .38; cursor: not-allowed; text-decoration: line-through; }
+.variantNotice { margin-top: 8px; font-size: 10px; line-height: 1.9; color: #a34838; }
+.variantNotice button { display: block; margin-top: 5px; text-decoration: underline; font-weight: 650; }

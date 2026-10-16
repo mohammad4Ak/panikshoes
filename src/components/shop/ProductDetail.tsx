@@ -13,6 +13,7 @@ import { productPricing } from '@/lib/pricing'
 import styles from './commerce.module.css'
 import engagement from './product-engagement.module.css'
 import ProductReviews from './ProductReviews'
+import type { ProductVariant } from '@/types'
 
 interface ApiProduct {
   id: string
@@ -27,6 +28,8 @@ interface ApiProduct {
   sizes: number[]
   colors: string[]
   stock: number
+  inventoryConfigured?: boolean
+  variants?: ProductVariant[]
   specifications?: { name: string; value: string }[]
   ratingAverage?: number
   ratingCount?: number
@@ -43,6 +46,7 @@ export default function ProductDetail({ slug }: { slug: string }) {
   const [activeImage, setActiveImage] = useState(0)
   const [pricingNow, setPricingNow] = useState(() => Date.now())
   const addItem = useCart((state) => state.addItem)
+  const cartItems = useCart((state) => state.items) ?? []
   const syncRating = useCallback(({ average, count }: { average: number; count: number }) => {
     setProduct((current) => current ? { ...current, ratingAverage: average, ratingCount: count } : current)
   }, [])
@@ -60,8 +64,10 @@ export default function ProductDetail({ slug }: { slug: string }) {
         setPricingNow(Date.now())
         setQuantity(1)
         setActiveImage(0)
-        setSelectedSize(data.sizes?.includes(42) ? 42 : (data.sizes?.[0] ?? null))
-        setActiveColor(data.colors?.[0] ?? '-')
+        const available = data.inventoryConfigured === true ? (data.variants ?? []).filter(variant => variant.isActive && variant.stock > 0) : []
+        const initial = available.find(variant => variant.size === 42) ?? available[0]
+        setSelectedSize(initial?.size ?? null)
+        setActiveColor(initial?.color ?? '')
       })
       .catch(() => { if (!controller.signal.aborted) setProduct(null) })
       .finally(() => { if (!controller.signal.aborted) setLoadedSlug(slug) })
@@ -91,13 +97,28 @@ export default function ProductDetail({ slug }: { slug: string }) {
     </div></div>
   }
 
-  const outOfStock = product.stock <= 0
+  const variants = product.inventoryConfigured === true ? (product.variants ?? []).filter(variant => variant.isActive) : []
+  const inCart = (variant: ProductVariant) => cartItems.filter(item => item.productId === product.id && item.size === variant.size && item.color === variant.color).reduce((sum, item) => sum + item.quantity, 0)
+  const remaining = (variant: ProductVariant) => Math.max(0, variant.stock - inCart(variant))
+  const selectedVariant = variants.find(variant => variant.size === selectedSize && variant.color === activeColor)
+  const availableQuantity = selectedVariant ? remaining(selectedVariant) : 0
+  const purchaseQuantity = Math.min(quantity, availableQuantity)
+  const outOfStock = !variants.some(variant => variant.stock > 0)
+  const sizes = [...new Set([...(product.sizes ?? []), ...variants.map(variant => variant.size)])].sort((a, b) => a - b)
+  const colors = [...new Set([...(product.colors ?? []), ...variants.map(variant => variant.color)])]
+  const chooseSize = (size: number) => {
+    const compatible = variants.filter(variant => variant.size === size && remaining(variant) > 0)
+    if (!compatible.length) return
+    setSelectedSize(size)
+    setActiveColor((compatible.find(variant => variant.color === activeColor) ?? compatible[0]).color)
+    setQuantity(1)
+  }
   const mainImage = product.images[activeImage] ?? product.images[0]
   const pricing = productPricing(product, new Date(pricingNow))
   const handleAddToCart = () => {
-    if (outOfStock || !selectedSize || !product.sizes.includes(selectedSize)) return
+    if (!selectedVariant || availableQuantity < 1 || purchaseQuantity < 1) return
     const currentPricing = productPricing(product)
-    addItem({ productId: product.id, name: product.name, price: currentPricing.effectivePrice, originalPrice: currentPricing.originalPrice, image: product.images[0], size: selectedSize, color: activeColor, quantity })
+    addItem({ productId: product.id, name: product.name, price: currentPricing.effectivePrice, originalPrice: currentPricing.originalPrice, image: product.images[0], size: selectedVariant.size, color: selectedVariant.color, variantId: selectedVariant.id, quantity: purchaseQuantity })
     toast('محصول به سبد خرید اضافه شد', product.name)
   }
 
@@ -128,26 +149,27 @@ export default function ProductDetail({ slug }: { slug: string }) {
             {pricing.isDiscounted && <div className={styles.saleLine}><del className={styles.originalPrice}>{formatPrice(pricing.originalPrice)} تومان</del><span className={styles.salePill}>{pricing.discountPercent ? `${formatPrice(pricing.discountPercent)}٪ تخفیف` : 'تخفیف ویژه'}</span></div>}
             <p className={styles.price}>{formatPrice(pricing.effectivePrice)} <small>تومان</small></p>
           </div>
-          <span className={styles.stock}>{outOfStock ? 'فعلاً ناموجود' : `${formatPrice(product.stock)} جفت موجود در انبار`}</span>
+          <span className={styles.stock} aria-live="polite">{outOfStock ? 'فعلاً ناموجود' : selectedVariant ? `${formatPrice(selectedVariant.stock)} جفت از سایز ${formatPrice(selectedVariant.size)}، رنگ ${selectedVariant.color}` : 'رنگ و سایز را انتخاب کن'}</span>
         </div>
         {product.description && <p className={styles.description}>{product.description}</p>}
-        {product.sizes.length > 0 && <div className={styles.options}>
+        {sizes.length > 0 && <div className={styles.options}>
           <h2>سایزت رو انتخاب کن</h2>
-          <div className={styles.choices}>{product.sizes.map((size) => <button key={size} onClick={() => setSelectedSize(size)} aria-pressed={selectedSize === size} className={`${styles.choice} ${selectedSize === size ? styles.choiceActive : ''}`}>{formatPrice(size)}</button>)}</div>
+          <div className={styles.choices}>{sizes.map((size) => <button key={size} disabled={!variants.some(variant => variant.size === size && remaining(variant) > 0)} onClick={() => chooseSize(size)} aria-pressed={selectedSize === size} className={`${styles.choice} ${selectedSize === size ? styles.choiceActive : ''}`}>{formatPrice(size)}</button>)}</div>
         </div>}
-        {product.colors.length > 0 && <div className={styles.options}>
+        {colors.length > 0 && <div className={styles.options}>
           <h2>رنگ دلخواهت</h2>
-          <div className={styles.choices}>{product.colors.map((color) => <button key={color} onClick={() => setActiveColor(color)} aria-pressed={activeColor === color} className={`${styles.choice} ${activeColor === color ? styles.choiceActive : ''}`}>{color}</button>)}</div>
+          <div className={styles.choices}>{colors.map((color) => <button key={color} disabled={!variants.some(variant => variant.size === selectedSize && variant.color === color && remaining(variant) > 0)} onClick={() => { setActiveColor(color); setQuantity(1) }} aria-pressed={activeColor === color} className={`${styles.choice} ${activeColor === color ? styles.choiceActive : ''}`}>{color}</button>)}</div>
         </div>}
         <div className={styles.purchase}>
           <div className={styles.quantity}>
-            <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={outOfStock || quantity <= 1} aria-label="کاهش تعداد"><Minus size={15} /></button>
-            <span aria-live="polite">{formatPrice(quantity)}</span>
-            <button onClick={() => setQuantity(Math.min(Math.max(product.stock, 1), quantity + 1))} disabled={outOfStock || quantity >= product.stock} aria-label="افزایش تعداد"><Plus size={15} /></button>
+            <button onClick={() => setQuantity(Math.max(1, purchaseQuantity - 1))} disabled={availableQuantity < 1 || purchaseQuantity <= 1} aria-label="کاهش تعداد"><Minus size={15} /></button>
+            <span aria-live="polite">{formatPrice(Math.max(1, purchaseQuantity))}</span>
+            <button onClick={() => setQuantity(Math.min(availableQuantity, purchaseQuantity + 1))} disabled={availableQuantity < 1 || purchaseQuantity >= availableQuantity} aria-label="افزایش تعداد"><Plus size={15} /></button>
           </div>
-          <button onClick={handleAddToCart} disabled={outOfStock || !selectedSize} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"><ShoppingBag size={18} />{outOfStock ? 'فعلاً ناموجود' : !selectedSize ? 'سایزی برای خرید موجود نیست' : 'افزودن به سبد خرید'}</button>
+          <button onClick={handleAddToCart} disabled={availableQuantity < 1} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"><ShoppingBag size={18} />{outOfStock ? 'فعلاً ناموجود' : availableQuantity < 1 ? 'این انتخاب در دسترس نیست' : 'افزودن به سبد خرید'}</button>
         </div>
-        {!outOfStock && quantity >= product.stock && product.stock > 0 && <p className="text-mist text-xs mt-3">بیشتر از این مقدار موجود نیست</p>}
+        {selectedVariant && inCart(selectedVariant) > 0 && <p className="text-mist text-xs mt-3">{formatPrice(inCart(selectedVariant))} جفت از این رنگ و سایز در سبدت هست؛ {formatPrice(availableQuantity)} جفت دیگر می‌توانی اضافه کنی.</p>}
+        {!outOfStock && availableQuantity > 0 && purchaseQuantity >= availableQuantity && <p className="text-mist text-xs mt-3">بیشتر از این مقدار از رنگ و سایز انتخابی موجود نیست</p>}
         <Link href="/cart" className={styles.cartLink}>مشاهدهٔ سبد خرید <ArrowLeft size={16} /></Link>
         <div className={styles.perks}>
           <span><RotateCcw />۷ روز ضمانت بازگشت</span>

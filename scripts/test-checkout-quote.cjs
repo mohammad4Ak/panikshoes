@@ -19,7 +19,12 @@ const coupons = load('src/lib/coupons.ts')
 const shipping = load('src/lib/shipping.ts')
 const origin = load('src/lib/request-origin.ts')
 const contract = load('src/lib/checkout-quote-contract.ts')
-const product = { id: 'shoe', price: 100000, salePrice: 80000, saleStartsAt: null, saleEndsAt: null }
+const inventory = load('src/lib/inventory.ts', {
+  './api-input': load('src/lib/api-input.ts', { 'next/server': { NextResponse: Response } }),
+  './inventory-contract': load('src/lib/inventory-contract.ts'),
+})
+const product = { id: 'shoe', name:'پانیک', price: 100000, salePrice: 80000, saleStartsAt: null, saleEndsAt: null,
+  inventoryConfigured:true, variants:[{id:'v',size:38,color:'مشکی',stock:10,isActive:true}] }
 const carrier = { id: 'post', isActive: true, baseCost: 50000, additionalItemCost: 10000, freeShippingThreshold: 150000 }
 const coupon = { id: 'coupon', code: 'PANIK10', name: 'پانیک', type: 'PERCENT', value: 10, maxDiscount: null,
   minSubtotal: 0, maxUses: 5, perUserLimit: 1, startsAt: null, endsAt: null, isActive: true, deletedAt: null, usedCount: 0, version: 1 }
@@ -39,17 +44,18 @@ function harness(options = {}) {
   const route = load('src/app/api/checkout/quote/route.ts', {
     'next/server': { NextResponse: Response }, '@/lib/prisma': { prisma }, '@/lib/auth': { auth: async () => options.anonymous ? null : { user: { id: 'customer' } } },
     '@/lib/coupons': coupons, '@/lib/pricing': pricing, '@/lib/shipping': shipping, '@/lib/payments': { expireUnpaidOrders: async () => 0 }, '@/lib/request-origin': origin,
+    '@/lib/inventory': inventory,
   })
   return { route, metrics: () => ({ reads, writes }), lookup: () => checkoutLookup }
 }
-const body = (extra = {}) => ({ items: [{ productId: 'shoe', quantity: 2 }], shippingMethodId: 'post', couponCode: 'PANIK10', ...extra })
+const body = (extra = {}) => ({ items: [{ productId: 'shoe', quantity: 2, size:38, color:'مشکی' }], shippingMethodId: 'post', couponCode: 'PANIK10', ...extra })
 const request = (value, extraHeaders = {}) => new Request('http://localhost/api/checkout/quote', {
   method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'http://localhost', ...extraHeaders }, body: JSON.stringify(value),
 })
 
 test('Checkout quote ignores forged client prices, applies direct sale then coupon, and uses net merchandise for free shipping', async () => {
   const h = harness()
-  const response = await h.route.POST(request(body({ items: [{ productId: 'shoe', quantity: 2, price: 1 }], total: 1, couponDiscount: 999999 })))
+  const response = await h.route.POST(request(body({ items: [{ productId: 'shoe', quantity: 2, size:38, color:'مشکی', price: 1 }], total: 1, couponDiscount: 999999 })))
   assert.equal(response.status, 200)
   const quote = await response.json()
   assert.equal(quote.grossSubtotal, 200000)
@@ -122,6 +128,15 @@ test('Client quote guard rejects inconsistent totals and malformed price updates
   const valid = { grossSubtotal: 200000, subtotal: 160000, productDiscount: 40000, couponDiscount: 16000, shippingCost: 60000, total: 204000, couponCode: 'PANIK10', productPrices: [{ productId: 'shoe', price: 80000, originalPrice: 100000 }] }
   assert.ok(contract.isCheckoutQuote(valid))
   for (const invalid of [null, { ...valid, total: 1 }, { ...valid, couponDiscount: 160001 }, { ...valid, shippingCost: -1 }, { ...valid, productPrices: [{ productId: 'shoe', price: 80000, originalPrice: 1 }] }]) assert.equal(contract.isCheckoutQuote(invalid), false)
+})
+
+test('Quote checks the exact selected combination and aggregates duplicate variants without reserving them', async () => {
+  for(const input of [body({items:[{productId:'shoe',size:39,color:'مشکی',quantity:1}]}),body({items:[{productId:'shoe',size:38,color:'کرم',quantity:1}]}),body({items:[{productId:'shoe',size:38,color:'مشکی',quantity:6},{productId:'shoe',size:38,color:'مشکی',quantity:5}]})]) {
+    const h=harness(), response=await h.route.POST(request(input))
+    assert.equal(response.status,409);assert.equal((await response.json()).code,'STOCK_UNAVAILABLE');assert.equal(h.metrics().writes,0)
+  }
+  const h=harness({products:[{...product,inventoryConfigured:false}]})
+  assert.equal((await (await h.route.POST(request(body()))).json()).code,'INVENTORY_NOT_CONFIGURED')
 })
 
 test('An owned committed checkout remains recoverable before rechecking its now-exhausted coupon', async () => {

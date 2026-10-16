@@ -30,9 +30,24 @@ const baseOrder = { id: 'order', userId: 'buyer', user: { name: 'خریدار', 
   items: [{ id: 'item', productId: 'shoe', productName: 'نام ثبت‌شده', product: { name: 'نام فعلی', images: [] }, quantity: 2, price: 100000, size: 42, color: 'مشکی' }],
 }
 
+// The shared inventory algorithm has its own transactional tests. Here its
+// transport contract isolates payment state claims and precise item forwarding.
+class InventoryError extends Error {
+  constructor(message, status = 409, code = 'STOCK_UNAVAILABLE', details = {}) {
+    super(message); this.status = status; this.code = code; this.details = details
+  }
+}
+const inventoryKey = item => JSON.stringify([item.productId, item.size, item.color])
+const inventory = {
+  InventoryError,
+  releaseInventory: (tx, items) => tx.inventory.release(items),
+  reserveInventory: (tx, items, options) => tx.inventory.reserve(items, options),
+}
+
 function harness(options = {}) {
   let state = { order: { ...clone(baseOrder), ...clone(options.order ?? {}) },
     receipts: clone(options.receipts ?? []), invoice: clone(options.invoice ?? null), stock: options.stock ?? 8, invoiceCount: 0,
+    variantStocks: clone(options.variantStocks ?? null), inventoryEvents: [],
     method: { id: 'bank_transfer', name: 'کارت به کارت', description: null, isActive: false,
       cardNumber: null, cardholderName: null, bankName: null, sortOrder: 0, updatedAt: new Date(), ...options.method } }
   let session = options.session === undefined ? { user: { id: 'buyer', role: 'USER' } } : options.session
@@ -51,6 +66,7 @@ function harness(options = {}) {
     })
   }
   function client(current) {
+    let orderClaimed = false
     const fullOrder = () => current.order ? { ...clone(current.order), receipts: current.receipts.map((r) => pick(r, payments.receiptMetadataSelect)), invoice: clone(current.invoice) } : null
     return {
       order: {
@@ -59,7 +75,7 @@ function harness(options = {}) {
         findMany: async ({ where, select }) => matches(current.order, where) ? [pick(fullOrder(), select)] : [],
         updateMany: async ({ where, data }) => {
           if (options.loseClaim || !matches(current.order, where)) return { count: 0 }
-          Object.assign(current.order, clone(data)); return { count: 1 }
+          Object.assign(current.order, clone(data)); orderClaimed = true; return { count: 1 }
         },
       },
       paymentReceipt: {
@@ -84,6 +100,33 @@ function harness(options = {}) {
         updateMany: async ({ where, data }) => {
           if (current.stock < where.stock.gte) return { count: 0 }
           current.stock -= data.stock.decrement; return { count: 1 }
+        },
+      },
+      inventory: {
+        release: async items => {
+          assert.ok(orderClaimed, 'Inventory release must follow the order state claim')
+          if (options.stockError) throw new Error('inventory update failure')
+          current.inventoryEvents.push({ action: 'release', items: clone(items) })
+          for (const item of items) {
+            current.stock += item.quantity
+            if (current.variantStocks) current.variantStocks[inventoryKey(item)] += item.quantity
+          }
+        },
+        reserve: async (items, reserveOptions) => {
+          assert.ok(orderClaimed, 'Inventory reserve must follow the order state claim')
+          assert.equal(reserveOptions?.allowLegacy, true, 'Historical payment reviews support migrated orders')
+          const grouped = new Map()
+          for (const item of items) grouped.set(inventoryKey(item), (grouped.get(inventoryKey(item)) ?? 0) + item.quantity)
+          const total = items.reduce((quantity, item) => quantity + item.quantity, 0)
+          if (current.stock < total || (current.variantStocks && [...grouped].some(([key, quantity]) => (current.variantStocks[key] ?? 0) < quantity))) {
+            throw new InventoryError('موجودی رنگ و سایز انتخاب‌شده کافی نیست.', 409, 'STOCK_UNAVAILABLE', {
+              outOfStockDetails: items.map(item => ({ productId: item.productId, size: item.size, color: item.color, availableQuantity: current.variantStocks?.[inventoryKey(item)] ?? current.stock })),
+            })
+          }
+          current.inventoryEvents.push({ action: 'reserve', items: clone(items) })
+          current.stock -= total
+          if (current.variantStocks) for (const [key, quantity] of grouped) current.variantStocks[key] -= quantity
+          return new Map()
         },
       },
       invoice: { create: async ({ data }) => {
@@ -114,10 +157,10 @@ function harness(options = {}) {
       return result
     } finally { unlock() }
   } : client(state)[property] })
-  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': requestOrigin, '@/lib/coupons': coupons })
+  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': requestOrigin, '@/lib/coupons': coupons, '@/lib/inventory': inventory })
   const dependencies = { 'next/server': { NextResponse: Response }, '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': { prisma }, '@/lib/payments': payments, '@/lib/payment-contract': contract, '@/lib/invoice': invoice,
-    '@/lib/coupons': coupons,
+    '@/lib/coupons': coupons, '@/lib/inventory': inventory,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName: options.storeName ?? 'کفش لند' }) } }
   return { state: () => state, payments, asAdmin: () => { session = { user: { id: 'admin', role: 'ADMIN' } } },
     route: (file) => load(`src/app/api/${file}/route.ts`, dependencies) }
@@ -453,7 +496,7 @@ test('Late approval reacquires stock once and insufficient stock keeps payment a
     const response = await route.POST(reviewRequest(), params)
     assert.equal(response.status, stock === 1 ? 409 : 200)
     if (stock === 1) {
-      assert.equal((await response.json()).code, 'INSUFFICIENT_STOCK')
+      assert.equal((await response.json()).code, 'STOCK_UNAVAILABLE')
       assert.equal(h.state().order.verified, false)
       assert.equal(h.state().receipts[0].status, 'PENDING')
     } else {
@@ -461,6 +504,65 @@ test('Late approval reacquires stock once and insufficient stock keeps payment a
       assert.equal(h.state().invoiceCount, 1)
     }
     assert.equal(h.state().stock, stock === 1 ? 1 : 8)
+  }
+})
+
+test('Cancellation and expiry release the exact purchased color and size only once', async () => {
+  const black = { ...baseOrder.items[0], quantity: 1, variantId: 'black-42' }
+  const cream = { ...baseOrder.items[0], id: 'cream-item', quantity: 2, color: 'کرم', size: 43, variantId: 'cream-43' }
+  const untouched = { ...black, color: 'کرم' }
+  for (const action of ['cancel', 'expire']) {
+    const h = harness({ stock: 5, order: { items: [black, cream], paymentExpiresAt: action === 'expire' ? new Date(0) : baseOrder.paymentExpiresAt },
+      variantStocks: { [inventoryKey(black)]: 0, [inventoryKey(cream)]: 2, [inventoryKey(untouched)]: 3 } })
+    if (action === 'cancel') {
+      assert.equal((await h.route('orders/[id]/cancel').POST(cancelRequest(), params)).status, 200)
+      assert.equal((await h.route('orders/[id]/cancel').POST(cancelRequest(), params)).status, 200)
+    } else {
+      assert.equal(await h.payments.expireUnpaidOrders(), 1)
+      assert.equal(await h.payments.expireUnpaidOrders(), 0)
+    }
+    const state = h.state()
+    assert.equal(state.stock, 8)
+    assert.deepEqual(state.variantStocks, { [inventoryKey(black)]: 1, [inventoryKey(cream)]: 4, [inventoryKey(untouched)]: 3 })
+    assert.deepEqual(state.inventoryEvents, [{ action: 'release', items: [black, cream] }])
+  }
+})
+
+test('Late approval cannot substitute another color stock for the purchased sold-out variant', async () => {
+  const black = { ...baseOrder.items[0], variantId: 'black-42' }
+  const cream = { ...black, color: 'کرم', variantId: 'cream-42' }
+  const h = harness({ stock: 20, variantStocks: { [inventoryKey(black)]: 0, [inventoryKey(cream)]: 20 },
+    order: { items: [black], status: 'CANCELLED', paymentStatus: 'AWAITING_REVIEW' }, receipts: [{ ...receipt, isLate: true }] })
+  h.asAdmin()
+  const response = await h.route('admin/payments/[id]/review').POST(reviewRequest(), params)
+  assert.equal(response.status, 409)
+  const body = await response.json()
+  assert.equal(body.code, 'STOCK_UNAVAILABLE')
+  assert.equal(body.outOfStockDetails[0].color, 'مشکی')
+  assert.match(body.error, /بازگشت وجه/)
+  assert.equal(h.state().order.status, 'CANCELLED')
+  assert.equal(h.state().order.verified, false)
+  assert.equal(h.state().receipts[0].status, 'PENDING')
+  assert.equal(h.state().invoiceCount, 0)
+  assert.equal(h.state().stock, 20)
+  assert.deepEqual(h.state().variantStocks, { [inventoryKey(black)]: 0, [inventoryKey(cream)]: 20 })
+})
+
+test('Repeated late approval reserves the exact variant once; invoice failure rolls both counters back', async () => {
+  const black = { ...baseOrder.items[0], variantId: 'black-42' }
+  const cream = { ...black, color: 'کرم', variantId: 'cream-42' }
+  for (const invoiceError of [false, true]) {
+    const h = harness({ invoiceError, stock: 10, variantStocks: { [inventoryKey(black)]: 3, [inventoryKey(cream)]: 7 },
+      order: { items: [black], status: 'CANCELLED', paymentStatus: 'AWAITING_REVIEW' }, receipts: [{ ...receipt, isLate: true }] })
+    h.asAdmin()
+    const review = h.route('admin/payments/[id]/review')
+    assert.equal((await review.POST(reviewRequest(), params)).status, invoiceError ? 500 : 200)
+    if (!invoiceError) assert.equal((await review.POST(reviewRequest(), params)).status, 200)
+    const state = h.state()
+    assert.equal(state.stock, invoiceError ? 10 : 8)
+    assert.deepEqual(state.variantStocks, { [inventoryKey(black)]: invoiceError ? 3 : 1, [inventoryKey(cream)]: 7 })
+    assert.deepEqual(state.inventoryEvents, invoiceError ? [] : [{ action: 'reserve', items: [black] }])
+    assert.equal(state.invoiceCount, invoiceError ? 0 : 1)
   }
 })
 

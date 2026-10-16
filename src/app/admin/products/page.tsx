@@ -14,6 +14,7 @@ import productStyles from './products.module.css'
 
 interface Specification { name: string; value: string }
 interface SpecificationRow extends Specification { key: number }
+interface InventoryVariant { id: string; size: number; color: string; stock: number; isActive: boolean }
 const specificationPresets = ['برند', 'جنس رویه', 'جنس زیره', 'ارتفاع پاشنه', 'نوع بسته‌شدن', 'کشور تولید']
 const specificationNameKey = (name: string) => name.trim().toLocaleLowerCase('fa-IR').normalize('NFKC')
 
@@ -31,6 +32,10 @@ interface Product {
   sizes: number[]
   colors: string[]
   stock: number
+  inventoryConfigured?: boolean
+  inventoryVersion?: number
+  legacyStock?: number
+  variants?: InventoryVariant[]
   featured: boolean
   categoryId: string
   category: { name: string }
@@ -48,9 +53,38 @@ const emptyForm = {
   categoryId: '',
   sizes: '40, 41, 42, 43',
   colors: 'مشکی, سفید',
-  stock: '',
+  variantStocks: {} as Record<string, string>,
   featured: false,
   specifications: [] as SpecificationRow[],
+}
+
+const variantKey = (size: number, color: string) => JSON.stringify([size, color])
+const MAX_STOCK = 2_147_483_647
+type InventoryBaseline = { version: number | null; configured: boolean; sizes: number[]; colors: string[]; stocks: Record<string, string>; legacyStock: number }
+
+function inventoryDimensions(sizeText: string, colorText: string) {
+  const normalized = sizeText.trim().replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - '۰'.charCodeAt(0))).replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - '٠'.charCodeAt(0)))
+  const entries = normalized ? normalized.split(/[,،]/).map(value => value.trim()) : []
+  const sizes = [...new Set(entries.map(Number))]
+  const colors = [...new Set(colorText.split(/[,،]/).map(value => value.trim()).filter(Boolean))]
+  let error = ''
+  if (entries.some(value => !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > MAX_STOCK)) error = 'سایزها باید عدد صحیح و بزرگ‌تر از صفر باشند و با کاما جدا شوند؛ مثل ۴۰، ۴۱، ۴۲. سایز اعشاری یا متن نامعتبر ذخیره نمی‌شود.'
+  else if (sizes.length > 100 || colors.length > 100 || colors.some(color => color.length > 100)) error = 'حداکثر ۱۰۰ سایز و ۱۰۰ رنگ با نام حداکثر ۱۰۰ نویسه وارد کن.'
+  else if (sizes.length * Math.max(colors.length, 1) > 500) error = 'حداکثر ۵۰۰ ترکیب سایز و رنگ می‌توانی تعریف کنی؛ تعداد سایزها یا رنگ‌ها را کمتر کن.'
+  const rows = error ? [] : sizes.flatMap(size => (colors.length ? colors : ['-']).map(color => ({ size, color, key: variantKey(size, color) })))
+  return { sizes, colors, rows, error }
+}
+
+function inventoryBaseline(product: Product): InventoryBaseline {
+  const stocks: Record<string, string> = {}
+  // Archived combinations keep real stock (including later returns). They stay
+  // hidden until their size/color is explicitly re-added to the dimensions.
+  for (const variant of product.variants ?? []) stocks[variantKey(variant.size, variant.color)] = String(variant.stock)
+  return {
+    version: Number.isSafeInteger(product.inventoryVersion) && product.inventoryVersion! >= 0 ? product.inventoryVersion! : null,
+    configured: product.inventoryConfigured === true, sizes: [...product.sizes], colors: [...product.colors], stocks,
+    legacyStock: product.legacyStock ?? (product.inventoryConfigured ? 0 : product.stock),
+  }
 }
 
 function dateTimeInput(value?: string | null) {
@@ -77,7 +111,8 @@ export default function AdminProductsPage() {
   const [reloadKey, setReloadKey] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [originalStock, setOriginalStock] = useState<number | null>(null)
+  const [originalInventory, setOriginalInventory] = useState<InventoryBaseline | null>(null)
+  const [inventoryTouched, setInventoryTouched] = useState(false)
   const [originalPricing, setOriginalPricing] = useState<Pick<Product, 'price' | 'salePrice' | 'saleStartsAt' | 'saleEndsAt'> | null>(null)
   const [stockConflict, setStockConflict] = useState(false)
   const [priceConflict, setPriceConflict] = useState(false)
@@ -116,7 +151,8 @@ export default function AdminProductsPage() {
 
   const openCreateModal = () => {
     setEditingId(null)
-    setOriginalStock(null)
+    setOriginalInventory(null)
+    setInventoryTouched(false)
     setOriginalPricing(null)
     setStockConflict(false)
     setPriceConflict(false)
@@ -128,7 +164,9 @@ export default function AdminProductsPage() {
 
   const openEditModal = (product: Product) => {
     setEditingId(product.id)
-    setOriginalStock(product.stock)
+    const inventory = inventoryBaseline(product)
+    setOriginalInventory(inventory)
+    setInventoryTouched(false)
     setOriginalPricing({ price: product.price, salePrice: product.salePrice ?? null, saleStartsAt: product.saleStartsAt ?? null, saleEndsAt: product.saleEndsAt ?? null })
     setStockConflict(false)
     setPriceConflict(false)
@@ -143,7 +181,7 @@ export default function AdminProductsPage() {
       categoryId: product.categoryId,
       sizes: product.sizes.join(', '),
       colors: product.colors.join(', '),
-      stock: String(product.stock),
+      variantStocks: inventory.stocks,
       featured: product.featured,
       specifications: (product.specifications ?? []).map((row) => ({ ...row, key: ++nextSpecificationKey.current })),
     })
@@ -175,12 +213,21 @@ export default function AdminProductsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (saving || stockConflict || priceConflict) return
-    const sizeText = form.sizes.trim()
-      .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - '۰'.charCodeAt(0)))
-      .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - '٠'.charCodeAt(0)))
-    const sizeEntries = sizeText === '' ? [] : sizeText.split(/[,،]/).map((value) => value.trim())
-    if (sizeEntries.some((value) => !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1 || Number(value) > 2_147_483_647)) {
-      setMessage({ text: 'سایزها باید عدد صحیح و بزرگ‌تر از صفر باشند و با کاما جدا شوند؛ مثل ۴۰، ۴۱، ۴۲. سایز اعشاری یا متن نامعتبر ذخیره نمی‌شود.', error: true })
+    const dimensions = inventoryDimensions(form.sizes, form.colors)
+    if (dimensions.error) {
+      setMessage({ text: dimensions.error, error: true })
+      return
+    }
+    const variants = dimensions.rows.map(row => ({ size: row.size, color: row.color, stock: Number(form.variantStocks[row.key] ?? '0') }))
+    if (dimensions.rows.some(row => !/^\d+$/.test(form.variantStocks[row.key] ?? '0')) || variants.some(row => !Number.isSafeInteger(row.stock) || row.stock < 0 || row.stock > MAX_STOCK) || variants.reduce((sum, row) => sum + row.stock, 0) > MAX_STOCK) {
+      setMessage({ text: 'موجودی هر ترکیب باید عدد صحیح و نامنفی باشد و مجموع موجودی از سقف مجاز بیشتر نشود.', error: true })
+      return
+    }
+    const dimensionsChanged = !originalInventory || JSON.stringify(dimensions.sizes) !== JSON.stringify(originalInventory.sizes) || JSON.stringify(dimensions.colors) !== JSON.stringify(originalInventory.colors)
+    const inventoryChanged = !editingId || dimensionsChanged || variants.some(row => row.stock !== Number(originalInventory?.stocks[variantKey(row.size, row.color)] ?? '0')) || Boolean(originalInventory && !originalInventory.configured && inventoryTouched)
+    if (editingId && inventoryChanged && originalInventory?.version == null) {
+      setStockConflict(true)
+      setMessage({ text: 'نسخهٔ موجودی در دسترس نیست؛ موجودی سایز و رنگ را تازه‌سازی کن.', error: true })
       return
     }
     const specifications = form.specifications.map(({ name, value }) => ({ name: name.trim(), value: value.trim() }))
@@ -226,11 +273,7 @@ export default function AdminProductsPage() {
       ...(pricingChanged ? { ...pricing, ...(editingId ? { expectedPricing: originalPricing } : {}) } : {}),
       images: form.images,
       categoryId: form.categoryId,
-      sizes: sizeEntries.map(Number),
-      colors: form.colors.split(',').map((c) => c.trim()).filter(Boolean),
-      ...(!editingId ? { stock: Number(form.stock) } : Number(form.stock) !== originalStock
-        ? { stock: Number(form.stock), expectedStock: originalStock }
-        : {}),
+      ...(inventoryChanged ? { sizes: dimensions.sizes, colors: dimensions.colors, variants, ...(editingId ? { expectedInventoryVersion: originalInventory!.version } : {}) } : {}),
       featured: form.featured,
       specifications,
     }
@@ -245,7 +288,7 @@ export default function AdminProductsPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        if (data.code === 'PRODUCT_STOCK_CHANGED') setStockConflict(true)
+        if (data.code === 'PRODUCT_INVENTORY_CHANGED' || data.code === 'PRODUCT_STOCK_CHANGED') setStockConflict(true)
         if (data.code === 'PRODUCT_PRICE_CHANGED') setPriceConflict(true)
         setMessage({ text: data.error || 'خطا در ذخیره محصول', error: true })
         return
@@ -275,12 +318,14 @@ export default function AdminProductsPage() {
         setForm(previous => ({ ...previous, price: String(data.price), salePrice: data.salePrice == null ? '' : String(data.salePrice), saleStartsAt: dateTimeInput(data.saleStartsAt), saleEndsAt: dateTimeInput(data.saleEndsAt) }))
         setPriceConflict(false)
       } else {
-        if (!Number.isSafeInteger(data.stock) || data.stock < 0) throw new Error('پاسخ موجودی معتبر نیست.')
-        setOriginalStock(data.stock)
-        setForm((previous) => ({ ...previous, stock: String(data.stock) }))
+        if (typeof data.inventoryConfigured !== 'boolean' || !Number.isSafeInteger(data.inventoryVersion) || data.inventoryVersion < 0 || !Array.isArray(data.sizes) || !Array.isArray(data.colors) || !Array.isArray(data.variants) || data.variants.some((variant: InventoryVariant) => !Number.isSafeInteger(variant.stock) || variant.stock < 0 || typeof variant.isActive !== 'boolean')) throw new Error('پاسخ موجودی معتبر نیست.')
+        const inventory = inventoryBaseline(data)
+        setOriginalInventory(inventory)
+        setInventoryTouched(false)
+        setForm(previous => ({ ...previous, sizes: data.sizes.join(', '), colors: data.colors.join(', '), variantStocks: inventory.stocks }))
         setStockConflict(false)
       }
-      setMessage({ text: pricingOnly ? 'قیمت و تخفیف تازه بارگذاری شدند. آن‌ها را بررسی کن و سپس تغییرات را ذخیره کن.' : 'موجودی تازه بارگذاری شد. مقدار موجودی را بررسی کن و سپس تغییرات را ذخیره کن.', error: false })
+      setMessage({ text: pricingOnly ? 'قیمت و تخفیف تازه بارگذاری شدند. آن‌ها را بررسی کن و سپس تغییرات را ذخیره کن.' : 'موجودی سایز و رنگ تازه بارگذاری شد. تعداد هر ترکیب را بررسی کن و سپس تغییرات را ذخیره کن.', error: false })
     } catch (cause) {
       setMessage({ text: cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'دریافت موجودی تازه انجام نشد.', error: true })
     } finally {
@@ -304,6 +349,8 @@ export default function AdminProductsPage() {
   }
 
   const filtered = products.filter((p) => p.name.includes(searchQuery))
+  const dimensions = inventoryDimensions(form.sizes, form.colors)
+  const inventoryTotal = dimensions.rows.reduce((sum, row) => sum + Number(form.variantStocks[row.key] ?? '0'), 0)
 
   return (
     <div>
@@ -358,7 +405,7 @@ export default function AdminProductsPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4"><div className={productStyles.tablePrice}>{productPricing(product).isDiscounted && <del>{formatPrice(product.price)} تومان</del>}<span>{formatPrice(productPricing(product).effectivePrice)} تومان</span>{product.salePrice != null && <small>{discountStatus(product)}</small>}</div></td>
-                  <td className="px-6 py-4">{product.stock.toLocaleString('fa-IR')}</td>
+                  <td className="px-6 py-4">{product.stock.toLocaleString('fa-IR')}{product.inventoryConfigured === false && <small className={productStyles.inventoryPending}>نیاز به تخصیص سایز و رنگ</small>}</td>
                   <td className="px-6 py-4">
                     {product.featured && <span className="text-green-600 font-bold">✓</span>}
                   </td>
@@ -454,16 +501,6 @@ export default function AdminProductsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-2">موجودی</label>
-                  <FormattedNumberInput
-                    min={0}
-                    max={2_147_483_647}
-                    className="input-field"
-                    value={form.stock}
-                    onValueChange={value => setForm({ ...form, stock: value })}
-                  />
-                </div>
-                <div>
                   <label htmlFor="product-category" className="block font-bold mb-2">دسته‌بندی *</label>
                   <EnhancedSelect
                     id="product-category"
@@ -488,8 +525,10 @@ export default function AdminProductsPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-bold mb-2">سایزها (با کاما جدا کنید)</label>
+                  <label htmlFor="product-inventory-sizes" className="block font-bold mb-2">سایزها (با کاما جدا کنید)</label>
                   <input
+                    id="product-inventory-sizes"
+                    disabled={saving || stockConflict}
                     className="input-field"
                     dir="ltr"
                     value={form.sizes}
@@ -497,14 +536,36 @@ export default function AdminProductsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-2">رنگها (با کاما جدا کنید)</label>
+                  <label htmlFor="product-inventory-colors" className="block font-bold mb-2">رنگها (با کاما جدا کنید)</label>
                   <input
+                    id="product-inventory-colors"
+                    disabled={saving || stockConflict}
                     className="input-field"
                     value={form.colors}
                     onChange={(e) => setForm({ ...form, colors: e.target.value })}
                   />
                 </div>
               </div>
+
+              <fieldset className={productStyles.inventory} disabled={saving || stockConflict}>
+                <legend>موجودی هر سایز و رنگ</legend>
+                <p className={productStyles.hint}>تعداد قابل فروش را برای هر ترکیب جداگانه وارد کن. ترکیب تازه از صفر شروع می‌شود؛ برای کالای بدون رنگ، رنگ‌ها را خالی بگذار.</p>
+                {originalInventory && !originalInventory.configured && <div className={productStyles.allocationNotice}>
+                  <strong>موجودی قبلی هنوز تفکیک نشده است.</strong>
+                  <p>{formatPrice(originalInventory.legacyStock)} جفت موجودی قبلی باید بر اساس شمارش واقعی به سایز و رنگ تخصیص داده شود. این مقدار بین ردیف‌ها تقسیم نشده و تا تنظیم موجودی، محصول قابل خرید نیست.</p>
+                  {!inventoryTouched && <button type="button" onClick={() => setInventoryTouched(true)}>فعال‌سازی موجودی تفکیکی</button>}
+                </div>}
+                {dimensions.error ? <p role="alert" className={productStyles.inventoryError}>{dimensions.error}</p> : dimensions.rows.length === 0 ? <p className={productStyles.empty}>برای تعریف ترکیب‌ها، حداقل یک سایز وارد کن.</p> : <div className={productStyles.inventoryScroll}>
+                  <table className={productStyles.inventoryTable} aria-label="موجودی سایز و رنگ">
+                    <thead><tr><th scope="col">سایز</th><th scope="col">رنگ</th><th scope="col">تعداد قابل فروش</th></tr></thead>
+                    <tbody>{dimensions.rows.map(row => <tr key={row.key}>
+                      <th scope="row">{row.size.toLocaleString('fa-IR')}</th><td>{row.color === '-' ? 'بدون رنگ' : row.color}</td>
+                      <td><FormattedNumberInput required min={0} max={MAX_STOCK} aria-label={`موجودی سایز ${row.size.toLocaleString('fa-IR')}، رنگ ${row.color === '-' ? 'بدون رنگ' : row.color}`} data-variant-size={row.size} data-variant-color={row.color} value={form.variantStocks[row.key] ?? '0'} onValueChange={value => { setInventoryTouched(true); setForm(previous => ({ ...previous, variantStocks: { ...previous.variantStocks, [row.key]: value } })) }} /></td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>}
+                <div className={productStyles.inventorySummary}><span>{dimensions.rows.length.toLocaleString('fa-IR')} ترکیب</span><strong>مجموع موجودی: {Number.isSafeInteger(inventoryTotal) && inventoryTotal >= 0 && inventoryTotal <= MAX_STOCK ? `${formatPrice(inventoryTotal)} جفت` : 'نیاز به اصلاح'}</strong></div>
+              </fieldset>
 
               <fieldset className={productStyles.discount} disabled={saving}>
                 <legend>تخفیف مستقیم محصول</legend>

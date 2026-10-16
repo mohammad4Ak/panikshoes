@@ -23,6 +23,7 @@ interface ApiProduct {
   saleEndsAt?: string | null
   images: string[]
   stock: number
+  inventoryConfigured?: boolean
   categoryId: string
   category: { name: string }
   ratingAverage?: number
@@ -117,7 +118,7 @@ function ProductsContent() {
       if (searchQuery && ![p.name, p.slug, p.description].some((text) => text?.toLocaleLowerCase().includes(searchQuery))) return false
       if (min !== null && !isNaN(min) && priceOf(p) < min) return false
       if (max !== null && !isNaN(max) && priceOf(p) > max) return false
-      if (inStockOnly && p.stock <= 0) return false
+      if (inStockOnly && (p.inventoryConfigured !== true || p.stock <= 0)) return false
       return true
     })
 
@@ -281,6 +282,7 @@ function ProductsContent() {
                   image: product.images[0],
                   category: product.category?.name ?? '',
                   stock: product.stock,
+                  inventoryConfigured: product.inventoryConfigured,
                   ratingAverage: product.ratingAverage ?? 0,
                   ratingCount: product.ratingCount ?? 0,
                 }}

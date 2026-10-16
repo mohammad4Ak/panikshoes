@@ -13,7 +13,17 @@ export interface Product {
   sizes: number[]
   colors: string[]
   stock: number
+  inventoryConfigured?: boolean
+  variants?: ProductVariant[]
   featured: boolean
+}
+
+export interface ProductVariant {
+  id: string
+  size: number
+  color: string
+  stock: number
+  isActive: boolean
 }
 
 export interface CartItem {
@@ -25,6 +35,7 @@ export interface CartItem {
   size: number
   color: string
   quantity: number
+  variantId?: string
 }
 
 export interface OrderFormData {

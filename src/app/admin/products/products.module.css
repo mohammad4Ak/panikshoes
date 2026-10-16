@@ -53,4 +53,24 @@
 .tablePrice { display: grid; gap: 3px; }
 .tablePrice del { color: rgb(var(--theme-muted, 105 116 110)); font-size: 11px; }
 .tablePrice small { color: rgb(var(--theme-brand, 18 102 74)); font-size: 10px; }
+.inventory { min-width: 0; padding: 19px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 23px; background: rgb(var(--theme-surface-soft, 247 250 248)); }
+.inventory legend { padding-inline: 7px; font-size: 14px; font-weight: 750; }
+.inventoryScroll { max-height: 360px; overflow: auto; margin-top: 14px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 17px; background: white; }
+.inventoryTable { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.inventoryTable thead th { position: sticky; top: 0; z-index: 1; background: rgb(var(--theme-brand-soft, 234 243 238)); padding: 12px; text-align: right; font-size: 10px; font-weight: 650; }
+.inventoryTable tbody th, .inventoryTable td { padding: 10px 12px; border-bottom: 1px solid rgb(var(--theme-brand-soft, 234 240 236)); text-align: right; }
+.inventoryTable tbody tr:last-child :is(th, td) { border-bottom: 0; }
+.inventoryTable tbody th { font-weight: 700; }
+.inventoryTable td:last-child { width: 145px; }
+.inventoryTable input { width: 100%; min-width: 76px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 12px; padding: 9px 11px; font-size: 13px; background: rgb(var(--theme-surface-soft, 247 250 248)); }
+.inventoryTable input:disabled { opacity: .5; }
+.inventorySummary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 14px; font-size: 11px; color: rgb(var(--theme-muted, 105 116 110)); }
+.inventorySummary strong { color: rgb(var(--theme-brand, 18 102 74)); }
+.allocationNotice { margin-top: 14px; padding: 15px; border: 1px solid #ead7af; border-radius: 17px; background: #fff9ec; color: #7e611e; font-size: 11px; line-height: 2; }
+.allocationNotice strong { font-size: 12px; }
+.allocationNotice p { margin-top: 5px; }
+.allocationNotice button { padding: 8px 12px; border-radius: 99px; background: white; border: 1px solid #ead7af; font-weight: 650; margin-top: 10px; }
+.inventoryPending { display: block; margin-top: 5px; font-size: 10px; color: #9b6c2d; }
+.inventoryError { margin-top: 12px; font-size: 11px; line-height: 2; color: #b34b3e; }
+@media (max-width: 480px) { .inventory { padding: 14px; } .inventoryTable thead th, .inventoryTable tbody th, .inventoryTable td { padding: 10px 8px; } .inventoryTable td:last-child { width: 110px; } }
 @media (max-width: 480px) { .discount { padding: 14px; } .discountGrid { grid-template-columns: minmax(0, 1fr); } }

@@ -22,6 +22,8 @@ const paymentContext = { module: { exports: {} }, Date, require(name) {
   const dependencies = {
     '@/lib/prisma': { prisma }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
     '@/lib/request-origin': {}, '@/lib/coupons': context.module.exports,
+    // This coupon-only integration fixture deliberately has no order items.
+    '@/lib/inventory': { releaseInventory: async (_tx, items) => assert.equal(items.length, 0) },
   }
   assert.ok(name in dependencies, `Unexpected payment dependency: ${name}`)
   return dependencies[name]

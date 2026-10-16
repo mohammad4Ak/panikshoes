@@ -4,7 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { buildInvoiceSnapshot } from '@/lib/invoice'
 import { readSiteSettings } from '@/lib/site-settings'
 import { CouponError, reacquireCouponReservation } from '@/lib/coupons'
-import { nextOrderVersion, paymentDeadline, PaymentError, paymentQuantities, privatePaymentHeaders, receiptMetadataSelect, requireSameOrigin } from '@/lib/payments'
+import { InventoryError, reserveInventory } from '@/lib/inventory'
+import { nextOrderVersion, paymentDeadline, PaymentError, privatePaymentHeaders, receiptMetadataSelect, requireSameOrigin } from '@/lib/payments'
 
 const details = {
   user: { select: { name: true, email: true } },
@@ -48,10 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       })
       if (claimed.count !== 1) throw new PaymentError('این پرداخت هم‌زمان بررسی شده است؛ صفحه را تازه کنید.')
       if (approved && late) {
-        for (const [productId, quantity] of paymentQuantities(order.items)) {
-          const reserved = await tx.product.updateMany({ where: { id: productId, stock: { gte: quantity } }, data: { stock: { decrement: quantity } } })
-          if (reserved.count !== 1) throw new PaymentError('موجودی برای فعال‌سازی این سفارش کافی نیست؛ با خریدار برای جایگزینی یا بازگشت وجه هماهنگ کنید.', 409, 'INSUFFICIENT_STOCK')
-        }
+        await reserveInventory(tx, order.items, { allowLegacy: true })
         if (order.couponId) await reacquireCouponReservation(tx, id, order.userId, new Date())
       }
       const reviewedAt = new Date()
@@ -69,6 +67,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json(result, { headers: privatePaymentHeaders })
   } catch (error) {
     if (error instanceof PaymentError) return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status })
+    if (error instanceof InventoryError) return NextResponse.json({ error: `امکان رزرو مجدد موجودی این سفارش وجود ندارد: ${error.message}؛ با خریدار برای جایگزینی یا بازگشت وجه هماهنگ کنید.`, code: error.code, ...error.details }, { status: error.status })
     if (error instanceof CouponError) return NextResponse.json({ error: `ظرفیت کد تخفیف این سفارش قابل رزرو نیست: ${error.message}؛ پیش از تأیید، با خریدار هماهنگ کنید.`, code: error.code }, { status: 409 })
     return NextResponse.json({ error: 'ثبت نتیجه بررسی پرداخت انجام نشد.' }, { status: 500 })
   }

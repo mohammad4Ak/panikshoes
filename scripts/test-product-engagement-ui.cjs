@@ -17,7 +17,7 @@ const report = (overrides = {}) => ({
 })
 const review = { id: 'review-one', rating: 5, comment: 'کیفیت خیلی خوب', authorName: 'خریدار نمونه', verifiedBuyer: true, createdAt: '2026-10-09T08:00:00.000Z' }
 const myReview = { id: 'mine', rating: 4, comment: 'تجربهٔ من', status: 'APPROVED' }
-const product = { id: 'shoe-one', name: 'کفش نمونه', slug: 'panik-498', description: '', price: 1900000, images: ['/one.png', '/two.png'], sizes: [38, 39], colors: ['مشکی'], stock: 2, category: { name: 'رسمی' } }
+const product = { id: 'shoe-one', name: 'کفش نمونه', slug: 'panik-498', description: '', price: 1900000, images: ['/one.png', '/two.png'], sizes: [38, 39], colors: ['مشکی'], stock: 2, inventoryConfigured: true, variants: [{ id: 'shoe-one-38-black', size: 38, color: 'مشکی', stock: 2, isActive: true }, { id: 'shoe-one-39-black', size: 39, color: 'مشکی', stock: 0, isActive: true }], category: { name: 'رسمی' } }
 
 function nodes(tree) {
   if (Array.isArray(tree)) return tree.flatMap(nodes)

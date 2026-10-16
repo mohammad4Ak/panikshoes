@@ -4,6 +4,7 @@ const { readFileSync } = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const inventory = require('./helpers/inventory-double.cjs')
 const root = path.join(__dirname, '..')
 const clone = value => structuredClone(value)
 function load(file, dependencies = {}) {
@@ -28,8 +29,8 @@ const body = extra => ({ items: [item()], address: 'نشانی خریدار', ph
 const request = (payload, method = 'POST') => new Request('http://localhost/api/orders', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
 const context = id => ({ params: Promise.resolve({ id }) })
 
-// All business functions and route handlers are real. Only the database transport is
-// replaced with serial transactions and rollback; no local or deployed orders are touched.
+// Discount business functions and route handlers are real; inventory is a shared
+// transport double covered separately. Serial transactions/rollback never touch live orders.
 function harness(options = {}) {
   let state = { products: clone(options.products || catalogue), coupon: couponRow(options.coupon), orders: [], redemptions: [], receipts: [], invoices: [] }
   let session = { user: { id: 'buyer', role: 'USER', name: 'خریدار' } }
@@ -112,9 +113,10 @@ function harness(options = {}) {
       try { const result = await callback(client(() => draft)); state = draft; return result } finally { unlock() }
     }
   } })
-  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': origin, '@/lib/coupons': coupons })
+  const payments = load('src/lib/payments.ts', { '@/lib/prisma': { prisma }, '@/lib/payment-contract': contract, '@/lib/request-origin': origin, '@/lib/coupons': coupons, '@/lib/inventory': inventory })
   const dependencies = { 'next/server': { NextResponse: Response }, '@/lib/auth': { auth: async () => session }, '@/lib/prisma': { prisma },
     '@/lib/shipping': shipping, '@/lib/pricing': pricing, '@/lib/coupons': coupons, '@/lib/payments': payments,
+    '@/lib/inventory': inventory,
     '@/lib/payment-contract': contract, '@/lib/request-origin': origin, '@/lib/invoice': invoice,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName: 'کفش پانیک' }) },
   }

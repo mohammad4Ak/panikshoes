@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma'
 import { PAYMENT_WINDOW_MS, MAX_RECEIPT_BYTES, isValidCardNumber } from '@/lib/payment-contract'
 import { isSameOriginRequest } from '@/lib/request-origin'
 import { releaseCouponReservation } from '@/lib/coupons'
+import { releaseInventory } from '@/lib/inventory'
 import type { Prisma } from '@prisma/client'
 
 export { PAYMENT_WINDOW_MS } from '@/lib/payment-contract'
@@ -26,12 +27,6 @@ export function paymentDeadline(now = new Date()): Date {
 
 export function nextOrderVersion(previous: Date): Date {
   return new Date(Math.max(Date.now(), previous.getTime() + 1))
-}
-
-export function paymentQuantities(items: { productId: string; quantity: number }[]) {
-  const totals = new Map<string, number>()
-  for (const item of items) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
-  return [...totals].sort(([left], [right]) => left.localeCompare(right))
 }
 
 export function methodAvailability(method: { id: string; cardNumber: string | null; cardholderName: string | null }) {
@@ -73,9 +68,7 @@ export async function expireUnpaidOrders(now = new Date(), orderId?: string, sco
           data: { status: 'CANCELLED', paymentStatus: 'EXPIRED', paymentExpiresAt: null, updatedAt: nextOrderVersion(order.updatedAt) },
         })
         if (claimed.count !== 1) return 0
-        for (const [productId, quantity] of paymentQuantities(order.items)) {
-          await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
-        }
+        await releaseInventory(tx, order.items)
         if (order.couponId) await releaseCouponReservation(tx, order.id, now)
         return 1
       })
@@ -136,9 +129,7 @@ export async function cancelUnpaidOrder(orderId: string, userId: string) {
       if (latest?.userId === userId && alreadyCancelled(latest)) return cancellationDetails(latest)
       throw new PaymentError('وضعیت پرداخت هم‌زمان تغییر کرده است. صفحه را تازه کنید.', 409, 'PAYMENT_STATE_CHANGED')
     }
-    for (const [productId, quantity] of paymentQuantities(order.items)) {
-      await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
-    }
+    await releaseInventory(tx, order.items)
     if (order.couponId) await releaseCouponReservation(tx, order.id, new Date())
     return cancellationDetails({ ...order, status: 'CANCELLED', paymentStatus: 'UNPAID', paymentExpiresAt: null, updatedAt })
   })

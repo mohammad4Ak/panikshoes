@@ -131,7 +131,8 @@ async function main() {
   const admin = await db.user.create({ data: { email: 'admin@example.test', name: 'Test admin', role: 'ADMIN', password: 'not-a-login' } })
   const category = await db.category.create({ data: { name: 'Test', slug: 'test' } })
   const product = await db.product.create({ data: { name: 'Test shoe', slug: 'test-shoe', description: 'Test only', categoryId: category.id,
-    price: 100000, sizes: [42], colors: ['green'], images: [], stock: 20 } })
+    price: 100000, sizes: [42], colors: ['green'], images: [], stock: 20, inventoryConfigured: true,
+    variants: { create: { size: 42, color: 'green', stock: 20 } } } })
   const shipping = await db.shippingMethod.create({ data: { name: 'Test delivery', isActive: true, baseCost: 0 } })
   await db.paymentMethod.update({ where: { id: 'bank_transfer' }, data: { isActive: true, cardNumber: '6037990000000006', cardholderName: 'TEST ONLY' } })
   const orders = load('src/app/api/orders/route.ts')
@@ -147,6 +148,14 @@ async function main() {
   const login = (user) => { session = { user: { id: user.id, name: user.name, email: user.email, role: user.role } } }
   const asUser = (user, action) => requestSession.run({ user: { id: user.id, name: user.name, email: user.email, role: user.role } }, action)
   const stock = async () => (await db.product.findUniqueOrThrow({ where: { id: product.id } })).stock
+  async function setFixtureStock(quantity) {
+    // This isolated fixture has one active combination. Reset both counters
+    // under the parent lock so races exercise the same invariant as the app.
+    await db.$transaction(async tx => {
+      await tx.product.update({ where: { id: product.id }, data: { stock: quantity, inventoryVersion: { increment: 1 } } })
+      await tx.productVariant.update({ where: { productId_size_color: { productId: product.id, size: 42, color: 'green' } }, data: { stock: quantity } })
+    })
+  }
   async function saveSettings(changes) {
     const current = await asUser(admin, async () => {
       const response = await adminSettings.GET()
@@ -267,12 +276,12 @@ async function main() {
   const lateProof = (await lateResponse.json()).receipt
   assert.equal(lateProof.isLate, true)
   assert.equal(await stock(), 19)
-  await db.product.update({ where: { id: product.id }, data: { stock: 0 } })
+  await setFixtureStock(0)
   login(admin)
   assert.equal((await review.POST(json({ receiptId: lateProof.id, action: 'approve' }), params(expired.id))).status, 409)
   assert.equal(await db.invoice.count({ where: { orderId: expired.id } }), 0)
   assert.equal((await db.order.findUniqueOrThrow({ where: { id: expired.id } })).verified, false)
-  await db.product.update({ where: { id: product.id }, data: { stock: 19 } })
+  await setFixtureStock(19)
   assert.equal((await review.POST(json({ receiptId: lateProof.id, action: 'approve' }), params(expired.id))).status, 200)
   assert.equal(await stock(), 18)
 
@@ -371,7 +380,7 @@ async function main() {
 
   // Distinct authentication contexts compete for the final pair. A losing
   // request cannot create an order, reserve negative stock or deduct twice.
-  await db.product.update({ where: { id: product.id }, data: { stock: 1 } })
+  await setFixtureStock(1)
   const orderCountBefore = await db.order.count()
   const stockReads = []
   let releaseStockReads

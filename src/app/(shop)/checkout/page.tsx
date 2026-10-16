@@ -96,7 +96,7 @@ export default function CheckoutPage() {
       controller.abort()
       if (quoteRequest.current === requestId) setQuoteState({ key: quoteKey, quote: null, loading: false, error: 'محاسبهٔ مبلغ بیش از حد طول کشید. دوباره تلاش کن.' })
     }, 20_000)
-    const cartItems = items.map(item => ({ productId: item.productId, quantity: item.quantity }))
+    const cartItems = items.map(item => ({ productId: item.productId, quantity: item.quantity, size: item.size, color: item.color }))
     void fetch('/api/checkout/quote', {
       method: 'POST', cache: 'no-store', signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },

@@ -23,6 +23,7 @@ interface Product {
   image: string
   category: string
   stock?: number
+  inventoryConfigured?: boolean
   ratingAverage?: number
   ratingCount?: number
 }
@@ -33,7 +34,7 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, revealDelay = 0 }: ProductCardProps) {
-  const outOfStock = product.stock !== undefined && product.stock <= 0
+  const outOfStock = product.inventoryConfigured !== true || product.stock !== undefined && product.stock <= 0
   const href = `/products/${encodeURIComponent(product.slug)}`
   const pricing = productPricing(product)
 

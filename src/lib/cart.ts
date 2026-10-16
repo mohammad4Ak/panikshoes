@@ -47,7 +47,7 @@ export const useCart = create<CartStore>()(
           set({
             items: get().items.map((i) =>
               i.productId === item.productId && i.size === item.size && i.color === item.color
-                ? { ...i, price: item.price, originalPrice: item.originalPrice ?? item.price, quantity: i.quantity + item.quantity }
+                ? { ...i, price: item.price, originalPrice: item.originalPrice ?? item.price, variantId: item.variantId ?? i.variantId, quantity: i.quantity + item.quantity }
                 : i
             ),
           })

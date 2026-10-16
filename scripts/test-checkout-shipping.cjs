@@ -264,6 +264,23 @@ test('Selected carrier prices include additional pairs across quantities and sub
   assert.deepEqual(app.pushes, ['/payment/transfer/order-1'])
 })
 
+test('Checkout quotes include every chosen color/size and changing the variant invalidates the previous quote', async () => {
+  const app = checkout()
+  app.cart.items.push({ ...app.cart.items[0], size: 43, color: 'آبی', quantity: 1 })
+  await settleCheckout(app)
+  assert.deepEqual(app.quoteReads.at(-1).body.items.map(({ productId, quantity, size, color }) => ({ productId, quantity, size, color })), [
+    { productId: 'shoe-1', quantity: 3, size: 42, color: 'سبز' },
+    { productId: 'shoe-1', quantity: 1, size: 43, color: 'آبی' },
+  ])
+  app.cart.items[0].color = 'مشکی'
+  app.render()
+  assert.equal(submit(app).props.disabled, true)
+  await settleCheckout(app)
+  assert.equal(app.quoteReads.at(-1).body.items[0].color, 'مشکی')
+  assert.equal(submit(app).props.disabled, false)
+  app.unmount()
+})
+
 test('Free shipping threshold responds to cart quantity changes', async () => {
   const app = checkout({ quantity: 2, methods: [method({ freeShippingThreshold: 300000 })] })
   await settleCheckout(app)

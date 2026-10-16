@@ -6,6 +6,7 @@ import { productPricing } from '@/lib/pricing'
 import { calculateShippingCost, MAX_SHIPPING_AMOUNT, ShippingValidationError } from '@/lib/shipping'
 import { expireUnpaidOrders } from '@/lib/payments'
 import { isSameOriginRequest } from '@/lib/request-origin'
+import { assertInventoryAvailable, InventoryError, type InventoryItem } from '@/lib/inventory'
 
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' }
 
@@ -23,13 +24,17 @@ export async function POST(request: Request) {
       throw new CouponError('سبد خرید یا روش ارسال معتبر نیست')
     }
     const quantities = new Map<string, number>()
+    const requested: InventoryItem[] = []
     for (const item of body.items) {
       if (!item || typeof item !== 'object' || typeof item.productId !== 'string' || !item.productId.trim() || item.productId.length > 128 ||
-          !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > MAX_SHIPPING_AMOUNT) throw new CouponError('تعداد محصولات معتبر نیست')
+          !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > MAX_SHIPPING_AMOUNT ||
+          !Number.isSafeInteger(item.size) || item.size < 1 || item.size > MAX_SHIPPING_AMOUNT ||
+          (item.color != null && (typeof item.color !== 'string' || item.color.length > 100))) throw new CouponError('تعداد یا مشخصات محصولات معتبر نیست')
       const id = item.productId.trim()
       const quantity = (quantities.get(id) ?? 0) + item.quantity
       if (!Number.isSafeInteger(quantity) || quantity > MAX_SHIPPING_AMOUNT) throw new CouponError('تعداد محصولات معتبر نیست')
       quantities.set(id, quantity)
+      requested.push({ productId: id, size: item.size, color: typeof item.color === 'string' ? item.color.trim() || '-' : '-', quantity: item.quantity })
     }
     if (body.checkoutKey !== undefined && body.checkoutKey !== null &&
         (typeof body.checkoutKey !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.checkoutKey))) throw new CouponError('شناسهٔ ثبت سفارش معتبر نیست')
@@ -49,10 +54,11 @@ export async function POST(request: Request) {
       const now = new Date()
       const method = await tx.shippingMethod.findUnique({ where: { id: body.shippingMethodId as string } })
       if (!method?.isActive) throw new CouponError('روش ارسال دیگر در دسترس نیست', 409, 'SHIPPING_METHOD_UNAVAILABLE')
-      const products = await tx.product.findMany({ where: { id: { in: [...quantities.keys()] } } })
+      const products = await tx.product.findMany({ where: { id: { in: [...quantities.keys()] } }, include: { variants: true } })
       if (products.length !== quantities.size) throw new CouponError('یکی از محصولات سبد دیگر در دسترس نیست', 409, 'STOCK_UNAVAILABLE')
       let grossSubtotal = 0, subtotal = 0, count = 0
       const productPrices = products.map((product) => {
+        assertInventoryAvailable(product, requested.filter(item => item.productId === product.id))
         const pricing = productPricing(product, now)
         const quantity = quantities.get(product.id)!
         grossSubtotal += pricing.originalPrice * quantity
@@ -71,6 +77,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof CouponError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers })
     if (error instanceof ShippingValidationError) return NextResponse.json({ error: error.message }, { status: 400, headers })
+    if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status, headers })
     return NextResponse.json({ error: 'محاسبهٔ مبلغ سفارش انجام نشد؛ دوباره تلاش کنید' }, { status: 500, headers })
   }
 }

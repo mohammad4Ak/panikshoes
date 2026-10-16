@@ -78,6 +78,14 @@ function reservationSweep(rows, raceId) {
   const deps = {
     '@/lib/prisma': { prisma }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 }, '@/lib/request-origin': {},
     '@/lib/coupons': { releaseCouponReservation: async (_tx, id) => { released.push(id) } },
+    '@/lib/inventory': { releaseInventory: async (inventoryTx, items) => {
+      assert.ok(items.every(item => orders.some(order => order.status === 'CANCELLED' && order.items.some(candidate => candidate.productId === item.productId))), 'Expired orders are claimed before inventory is returned')
+      const totals = new Map()
+      for (const item of items) totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity)
+      for (const [productId, quantity] of [...totals].sort(([left], [right]) => left.localeCompare(right))) {
+        await inventoryTx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
+      }
+    } },
   }
   const compiled = { exports: {} }
   vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/payments.ts'), 'utf8'), { loader: 'ts', format: 'cjs' }).code,
