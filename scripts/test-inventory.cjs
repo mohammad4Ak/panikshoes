@@ -59,6 +59,11 @@ test('Concurrent requests compete for the selected variant and cannot consume an
   assert.equal(result.filter(r=>r.status==='fulfilled').length,1)
   const state=db.state(); assert.equal(state.variants[0].stock,0);assert.equal(state.variants[1].stock,8);totals(state)
   assert.equal(state.products[0].inventoryVersion,5)
+  assert.equal(state.stockMovements.length, 1)
+  assert.equal(state.stockMovements[0].type, 'RESERVE')
+  assert.equal(state.stockMovements[0].variantId, 'v0')
+  assert.equal(state.stockMovements[0].stockBefore, 1)
+  assert.equal(state.stockMovements[0].stockAfter, 0)
 })
 
 test('A product deleted after the catalog read returns an actionable stock conflict',async()=>{
@@ -82,6 +87,38 @@ test('Release restores exactly the historical variant and makes stale admin inve
   assert.equal(db.state().variants[0].stock,1);totals(db.state())
   await assert.rejects(db.prisma.$transaction(tx=>inventory.configureInventory(tx,'shoe',rows,4,{sizes:[38,39],colors:['مشکی','کرم']})),error=>error.code==='PRODUCT_INVENTORY_CHANGED')
   assert.equal(db.state().products[0].inventoryVersion,6)
+  assert.deepEqual(db.state().stockMovements.map(row => [row.type, row.stockBefore, row.stockAfter]), [['RESERVE',1,0],['RELEASE',0,1]])
+})
+
+test('Payment and dispatch ledger events preserve stock, exact variants and immutable actor/order snapshots', async () => {
+  const db = memory(), context = { actorId: 'admin', actorName: 'مدیر پانیک', orderId: 'historical-order', note: 'بررسی داخلی' }
+  await db.prisma.$transaction(tx => inventory.recordOrderInventoryEvent(tx, [item({variantId:'v0'})], 'SALE', context))
+  await db.prisma.$transaction(tx => inventory.recordOrderInventoryEvent(tx, [item({variantId:'v0'})], 'SHIPMENT', context))
+  const state = db.state()
+  assert.equal(state.products[0].stock, 11); assert.equal(state.variants[0].stock, 1)
+  assert.deepEqual(state.stockMovements.map(row => [row.type,row.stockBefore,row.stockAfter,row.quantity,row.variantId,row.actorName,row.orderId]), [
+    ['SALE',1,1,1,'v0','مدیر پانیک','historical-order'], ['SHIPMENT',1,1,1,'v0','مدیر پانیک','historical-order'],
+  ])
+  const before = db.state()
+  await assert.rejects(db.prisma.$transaction(async tx => { await inventory.recordOrderInventoryEvent(tx,[item()], 'SALE', context); throw new Error('ledger rollback') }))
+  assert.deepEqual(db.state(), before)
+})
+
+test('Absolute allocation records real adjustments and retired/reactivated units without a fake numeric loss', async () => {
+  const db = memory()
+  await db.prisma.$transaction(tx => inventory.configureInventory(tx,'shoe',[{size:38,color:'مشکی',stock:2}],4,{sizes:[38],colors:['مشکی']},{actorId:'admin',actorName:'مدیر'}))
+  let state = db.state()
+  assert.equal(state.products[0].stock,2)
+  const retired = state.stockMovements.filter(row => row.type === 'VARIANT_STATUS')
+  assert.equal(retired.length,3)
+  assert.ok(retired.every(row => row.activeBefore && !row.activeAfter && row.stockBefore === row.stockAfter))
+  assert.ok(retired.some(row => row.quantity===8))
+  assert.deepEqual(state.stockMovements.filter(row => row.type==='ADJUSTMENT').map(row=>[row.variantId,row.stockBefore,row.stockAfter,row.quantity]),[['v0',1,2,1]])
+  await db.prisma.$transaction(tx => inventory.configureInventory(tx,'shoe',[{size:38,color:'کرم',stock:8}],5,{sizes:[38],colors:['کرم']}))
+  state = db.state()
+  assert.equal(state.products[0].stock,8)
+  const activated = state.stockMovements.filter(row=>row.type==='VARIANT_STATUS'&&!row.activeBefore&&row.activeAfter)
+  assert.equal(activated.length,1); assert.equal(activated[0].variantId,'v1'); assert.equal(activated[0].stockBefore,8); assert.equal(activated[0].stockAfter,8)
 })
 
 test('Manual conversion preserves old totals until explicit allocation and links historical/retired combinations', async () => {
@@ -94,6 +131,24 @@ test('Manual conversion preserves old totals until explicit allocation and links
   assert.equal(db.state().variants.find(v=>v.id===retired.id).stock,2)
   assert.equal(db.state().products[0].stock,11);totals(db.state())
   await assert.rejects(db.prisma.$transaction(tx=>inventory.reserveInventory(tx,[item({size:40,color:'قدیمی',variantId:retired.id})],{allowLegacy:true})),error=>error.code==='STOCK_UNAVAILABLE')
+})
+
+test('Legacy allocation closes its original unassigned ledger balance before opening explicit variants', async () => {
+  const db=memory({products:[{...product,inventoryConfigured:false,inventoryVersion:0,stock:7}],variants:[],stockMovements:[{
+    id:'opening-legacy:shoe',productId:'shoe',variantId:null,type:'OPENING',quantity:7,stockBefore:0,stockAfter:7,activeBefore:false,activeAfter:false,
+  }]})
+  await db.prisma.$transaction(tx=>inventory.configureInventory(tx,'shoe',rows,0,{sizes:[38,39],colors:['مشکی','کرم']},{actorId:'admin',actorName:'مدیر',note:'تخصیص دستی'}))
+  const state=db.state(), legacy=state.stockMovements.filter(row=>row.variantId===null)
+  assert.equal(legacy.length,2)
+  assert.equal(legacy[1].type,'ADJUSTMENT');assert.equal(legacy[1].stockBefore,7);assert.equal(legacy[1].stockAfter,0)
+  assert.equal(legacy[1].activeBefore,false);assert.equal(legacy[1].activeAfter,false)
+  assert.equal(legacy[1].actorId,'admin');assert.match(legacy[1].note,/تخصیص ماندهٔ قدیمی/)
+  assert.equal(legacy.reduce((sum,row)=>sum+row.stockAfter-row.stockBefore,0),0)
+  assert.equal(state.stockMovements.reduce((sum,row)=>sum+row.stockAfter-row.stockBefore,0),state.products[0].stock)
+  assert.equal(state.products[0].stock,11);assert.equal(state.products[0].inventoryVersion,1)
+  const eventCount=state.stockMovements.length
+  await db.prisma.$transaction(tx=>inventory.configureInventory(tx,'shoe',rows,1,{sizes:[38,39],colors:['مشکی','کرم']}))
+  assert.equal(db.state().stockMovements.length,eventCount,'A subsequent unchanged allocation must not close or open balances again')
 })
 
 test('Unconfigured inventory can service historical orders but never accepts a new purchase', async () => {
@@ -124,12 +179,21 @@ const context={params:Promise.resolve({id:'shoe'})}
 
 test('Product creation derives total stock only from the complete variant matrix', async()=>{
   const db=memoryInventory({}),api=catalogApi(db)
-  const response=await api.create.POST(request({name:'پانیک',price:100,categoryId:'cat',sizes:[38,39],colors:['مشکی','کرم'],variants:rows}))
+  const response=await api.create.POST(request({code:'TEST-100',name:'پانیک',price:100,categoryId:'cat',sizes:[38,39],colors:['مشکی','کرم'],variants:rows}))
   assert.equal(response.status,201)
   const result=await response.json();assert.equal(result.stock,11);assert.equal(result.inventoryConfigured,true);assert.equal(result.variants.length,4)
   for(const invalid of [{stock:99},{variants:rows.slice(1)},{variants:[...rows.slice(1),rows[1]]}]) {
-    assert.equal((await api.create.POST(request({name:'پانیک',price:100,categoryId:'cat',sizes:[38,39],colors:['مشکی','کرم'],variants:rows,...invalid}))).status,400)
+    assert.equal((await api.create.POST(request({code:'TEST-100',name:'پانیک',price:100,categoryId:'cat',sizes:[38,39],colors:['مشکی','کرم'],variants:rows,...invalid}))).status,400)
   }
+  assert.equal(db.state().products.length,1)
+  assert.equal(db.state().stockMovements.filter(row=>row.type==='OPENING').length,4)
+  assert.ok(db.state().stockMovements.every(row=>row.actorId==='admin'&&row.productName==='پانیک'))
+})
+
+test('Products with inventory history cannot be deleted even when no order items remain', async()=>{
+  const db = memory({stockMovements:[{id:'historic',productId:'shoe',type:'OPENING'}]}), api=catalogApi(db)
+  const result = await api.update.DELETE(request({}),context)
+  assert.equal(result.status,409); assert.match((await result.json()).error,/گردش موجودی/)
   assert.equal(db.state().products.length,1)
 })
 
@@ -164,6 +228,6 @@ test('Public and admin catalog responses distinguish unallocated stock and varia
 test('Regular customers cannot create or allocate product inventory',async()=>{
   const db=memory(),api=catalogApi(db,{user:{id:'buyer',role:'USER'}}),before=db.state()
   assert.equal((await api.update.PUT(request({variants:rows,expectedInventoryVersion:4}),context)).status,401)
-  assert.equal((await api.create.POST(request({name:'shoe',price:100,categoryId:'cat',variants:[]}))).status,401)
+  assert.equal((await api.create.POST(request({code:'TEST-100',name:'shoe',price:100,categoryId:'cat',variants:[]}))).status,401)
   assert.deepEqual(db.state(),before)
 })

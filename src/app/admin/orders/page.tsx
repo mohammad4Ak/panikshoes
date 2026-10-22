@@ -30,18 +30,21 @@ interface Order {
   recipientName: string | null
   address: string
   phone: string
+  postalCode?: string | null
+  trackingCode?: string | null
+  trackingRecordedAt?: string | null
   createdAt: string
   invoice?: InvoiceMetadata | null
   user: { name: string; email: string }
   items: { id: string; quantity: number; size: number; color: string; price: number; originalPrice?: number | null; couponDiscount?: number; productName?: string | null; product: { name: string } }[]
 }
 
-const statusLabels: Record<string, { label: string; color: string }> = {
-  PENDING: { label: 'در انتظار پرداخت', color: 'bg-yellow-100 text-yellow-700' },
-  PROCESSING: { label: 'در حال پردازش', color: 'bg-sky-50 text-sky-700' },
-  SHIPPED: { label: 'ارسال شده', color: 'bg-teal-50 text-teal-700' },
-  DELIVERED: { label: 'تحویل شده', color: 'bg-green-100 text-green-700' },
-  CANCELLED: { label: 'لغو شده', color: 'bg-red-100 text-red-700' },
+const statusLabels: Record<string, { label: string; color: string; background: string }> = {
+  PENDING: { label: 'در انتظار پرداخت', color: '#a16207', background: '#fef9c3' },
+  PROCESSING: { label: 'در حال پردازش', color: '#0369a1', background: '#f0f9ff' },
+  SHIPPED: { label: 'ارسال شده', color: '#0f766e', background: '#f0fdfa' },
+  DELIVERED: { label: 'تحویل شده', color: '#15803d', background: '#dcfce7' },
+  CANCELLED: { label: 'لغو شده', color: '#b91c1c', background: '#fee2e2' },
 }
 
 const allStatuses = Object.keys(statusLabels)
@@ -114,6 +117,19 @@ export default function AdminOrdersPage() {
       .finally(() => { if (!signal.aborted) setLoading(false) })
   }, [query])
   const loadOrdersRef = useRef(loadOrders)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const initialSearch = new URLSearchParams(window.location.search).get('q')?.trim().slice(0, 200)
+    let active = true
+    void Promise.resolve().then(() => {
+      if (active && initialSearch) {
+        setSearch(initialSearch)
+        setFilters(previous => ({ ...previous, q: initialSearch, page: 1 }))
+      }
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     loadOrdersRef.current = loadOrders
@@ -300,13 +316,15 @@ export default function AdminOrdersPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3 md:px-6 md:py-4 font-bold">{formatPrice(order.total)}<span className={`block text-xs font-normal mt-1 ${order.verified ? 'text-green-700' : 'text-amber-700'}`}>{order.verified ? 'پرداخت تأییدشده' : paymentLabels[order.paymentStatus ?? ''] || 'پرداخت تأیید نشده'}</span>{order.paymentMethod === 'bank_transfer' && <Link href={`/admin/payments?orderId=${encodeURIComponent(order.id)}`} className="inline-block mt-2 text-xs font-medium text-brand underline underline-offset-4">{order.paymentStatus === 'AWAITING_REVIEW' ? 'بررسی رسید' : 'جزئیات پرداخت'}</Link>}</td>
-                    <td className="px-6 py-4">
-                      <EnhancedSelect nativeAppearance small
+                    <td className={`px-6 py-4 ${ui.statusCell}`}>
+                      <EnhancedSelect nativeAppearance
                         value={order.status}
                         disabled={busy || loading || search.trim() !== filters.q}
                         aria-label={`وضعیت سفارش ${order.id.slice(-6)}`}
                         onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                        className={`px-3 py-2 rounded-full text-sm border-none cursor-pointer ${statusLabels[order.status].color}`}
+                        wrapperClassName={ui.statusControl}
+                        className={ui.statusSelect}
+                        style={{ color: statusLabels[order.status].color, backgroundColor: statusLabels[order.status].background }}
                       >
                         {choicesFor(order).map((s) => (
                           <option key={s} value={s}>{s === 'PENDING' && order.paymentStatus === 'AWAITING_REVIEW' ? 'منتظر تأیید پرداخت' : s === 'PENDING' && order.verified ? 'در انتظار بررسی' : statusLabels[s].label}</option>
@@ -333,6 +351,9 @@ export default function AdminOrdersPage() {
                       <td colSpan={7} className="px-6 py-4">
                         <div className={`space-y-2 text-sm ${ui.orderDetails}`}>
                           <p>شناسهٔ کامل سفارش: <bdi>{order.id}</bdi></p>
+                          {order.postalCode && <p>کدپستی گیرنده: <bdi dir="ltr">{order.postalCode}</bdi></p>}
+                          {order.trackingCode && <p>کد رهگیری مرسوله: <bdi dir="ltr">{order.trackingCode}</bdi></p>}
+                          <Link href={`/admin/shipments?orderId=${encodeURIComponent(order.id)}`} className="inline-block text-brand underline underline-offset-4">ثبت و مدیریت رهگیری مرسوله</Link>
                           {order.items.map((item) => (
                             <div key={item.id} className="flex justify-between">
                               <span>

@@ -6,9 +6,13 @@ const vm = require('node:vm')
 const { transformSync } = require('esbuild')
 const pricingModule = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: pricingModule, Date })
+const localizedInputModule = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/localized-input.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: localizedInputModule })
+const contactModule = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/customer-contact.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: contactModule })
 
 // Execute the real page handlers with hook and fetch doubles. No server or DB is contacted.
-const shoe = { id: 'shoe-1', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, inventoryConfigured: true, inventoryVersion: 1, variants: [{ id: 'variant-1', size: 42, color: 'سبز', stock: 5, isActive: true }], sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
+const shoe = { id: 'shoe-1', code: 'PANIK-00622', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, inventoryConfigured: true, inventoryVersion: 1, variants: [{ id: 'variant-1', size: 42, color: 'سبز', stock: 5, isActive: true }], sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
 const category = { id: 'cat-1', name: 'کتانی', slug: 'sneaker', image: null, _count: { products: 0 } }
 const user = { id: 'user-1', name: 'مشتری نمونه', email: 'customer@example.test', phone: null, role: 'USER', _count: { orders: 1 } }
 const order = (overrides = {}) => ({ id: 'order-pending', total: 150000, shippingMethodName: 'پست پیشتاز', shippingCost: 50000, status: 'PENDING', verified: false, recipientName: 'گیرنده نمونه', address: 'نشانی نمونه', phone: '09123456789', createdAt: '2026-10-01T08:00:00Z', user: { name: user.name, email: user.email }, items: [{ id: 'line-1', quantity: 1, size: 42, color: 'سبز', price: 100000, product: { name: shoe.name } }], ...overrides })
@@ -87,6 +91,9 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     '@/components/ui/PersianDatePicker': { __esModule: true, default: ({ onChange, ...props }) => jsx('input', { ...props, type: 'text', 'data-persian-date': true, onChange: event => onChange(event.target.value) }) },
     '@/lib/utils': { formatPrice: (value) => String(value) },
     '@/lib/pricing': pricingModule.exports,
+    '@/lib/localized-input': localizedInputModule.exports,
+    '@/lib/customer-contact': contactModule.exports,
+    '@/lib/session-actions': { signOutWithSessionLock: async () => {} },
     '@/components/shop/commerce.module.css': css,
     '@/components/admin/admin.module.css': css,
   }
@@ -141,8 +148,80 @@ test('Renaming a product does not resend the stale stock shown when the edit mod
   await find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
   const saved = JSON.parse(app.requests.find((item) => item.method === 'PUT').body)
   assert.equal(saved.name, 'New product name')
+  assert.equal(Object.hasOwn(saved, 'code'), false, 'Unrelated edits must not overwrite a code changed by another admin')
   assert.equal(Object.hasOwn(saved, 'stock'), false)
   assert.equal(Object.hasOwn(saved, 'expectedStock'), false)
+  app.unmount()
+})
+
+for (const search of ['panik-00622', 'PANIK-۰۰۶۲۲', 'panik-٠٠٦٢٢', '  00622  ']) {
+  test('Admin finds a product by its code with equivalent digits and case: ' + search, async () => {
+    const app = page('src/app/admin/products/page.tsx')
+    await settle(); app.render()
+    find(app, node => node.type === 'input' && node.props['aria-label'] === 'جستجو با نام یا کد محصول').props.onChange({ target: { value: search } }); app.render()
+    assert.equal(nodes(app.tree).filter(node => node.type === 'button' && node.props.title === 'ویرایش').length, 1)
+    assert.ok(text(app.tree).includes(shoe.code))
+    app.unmount()
+  })
+}
+
+test('Admin normalizes a changed product code, preserves leading zeros and omits unchanged inventory and pricing', async () => {
+  const app = page('src/app/admin/products/page.tsx', { queues: { 'PUT /api/products/shoe-1': [response(shoe)] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+  const field = find(app, node => node.props.id === 'product-code')
+  assert.equal(field.props.type, 'text')
+  assert.equal(field.props.required, true)
+  assert.equal(field.props.dir, 'ltr')
+  field.props.onChange({ target: { value: '  panik-۰۰۰۶۲۰  ' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const saved = JSON.parse(app.requests.find(item => item.method === 'PUT').body)
+  assert.equal(saved.code, 'PANIK-000620')
+  for (const key of ['price', 'expectedPricing', 'variants', 'expectedInventoryVersion']) assert.equal(Object.hasOwn(saved, key), false, key)
+  app.unmount()
+})
+
+for (const code of ['', '  ', 'کد-622', 'PANIK 622', 'x'.repeat(65), 'ß', 'ß'.repeat(65)]) {
+  test('Admin rejects an invalid product code without losing the form: ' + JSON.stringify(code).slice(0, 80), async () => {
+    const app = page('src/app/admin/products/page.tsx')
+    await settle(); app.render()
+    find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+    find(app, node => node.props.id === 'product-code').props.onChange({ target: { value: code } }); app.render()
+    await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
+    assert.equal(app.requests.filter(item => item.method === 'PUT').length, 0)
+    assert.ok(find(app, node => node.props.role === 'alert'))
+    assert.equal(find(app, node => node.props.id === 'product-code').props.value, code)
+    app.unmount()
+  })
+}
+
+test('A duplicate-code response preserves the draft and lets the admin correct only the code', async () => {
+  const app = page('src/app/admin/products/page.tsx', { queues: { 'PUT /api/products/shoe-1': [response({ error: 'این کد محصول قبلاً ثبت شده است.', code: 'PRODUCT_CODE_EXISTS' }, 409), response(shoe)] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && node.props.title === 'ویرایش').props.onClick(); app.render()
+  find(app, node => node.type === 'input' && node.props.value === shoe.name).props.onChange({ target: { value: 'نام اصلاح‌شده' } }); app.render()
+  find(app, node => node.props.id === 'product-code').props.onChange({ target: { value: 'taken-622' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
+  assert.ok(find(app, node => node.props.role === 'dialog'))
+  assert.match(text(app.tree), /این کد محصول قبلاً ثبت شده است/)
+  assert.equal(find(app, node => node.props.id === 'product-code').props.value, 'taken-622')
+  assert.ok(find(app, node => node.type === 'input' && node.props.value === 'نام اصلاح‌شده'))
+  find(app, node => node.props.id === 'product-code').props.onChange({ target: { value: 'new-622' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} }); app.render()
+  const saved = JSON.parse(app.requests.filter(item => item.method === 'PUT')[1].body)
+  assert.equal(saved.code, 'NEW-622')
+  assert.equal(saved.name, 'نام اصلاح‌شده')
+  app.unmount()
+})
+
+test('Creating a product requires and includes its admin-defined code without a numeric conversion', async () => {
+  const app = page('src/app/admin/products/page.tsx', { queues: { 'POST /api/products': [response(shoe)] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && text(node).includes('محصول جدید')).props.onClick(); app.render()
+  assert.equal(find(app, node => node.props.id === 'product-code').props.value, '')
+  find(app, node => node.props.id === 'product-code').props.onChange({ target: { value: '۰۰۶۲۲' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  assert.equal(JSON.parse(app.requests.find(item => item.method === 'POST').body).code, '00622')
   app.unmount()
 })
 

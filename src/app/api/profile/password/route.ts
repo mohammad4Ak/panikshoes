@@ -16,7 +16,12 @@ export async function POST(request: Request) {
     if (!user) throw new ApiInputError('کاربر یافت نشد', 404)
     if (!await bcrypt.compare(body.currentPassword, user.password)) throw new ApiInputError('رمز فعلی اشتباه است')
     const hashed = await bcrypt.hash(newPassword, 10)
-    await prisma.user.update({ where: { id: user.id }, data: { password: hashed } })
+    // A concurrent support reset must not be overwritten using the old secret.
+    const updated = await prisma.user.updateMany({
+      where: { id: user.id, password: user.password, isActive: true },
+      data: { password: hashed, authVersion: { increment: 1 } },
+    })
+    if (updated.count !== 1) throw new ApiInputError('اطلاعات حساب تغییر کرده است؛ دوباره وارد شوید', 409)
     return NextResponse.json({ success: true })
   } catch (error) { return apiError(error, 'خطا در تغییر رمز عبور') }
 }

@@ -126,6 +126,22 @@ test('Initial refresh, later focus and client navigation load current public bra
   app.unmount()
 })
 
+test('Mobile store-name visibility refreshes after an admin change and ignores older settings', async () => {
+  const app = mount({ initial: settings(2, { showMobileStoreName: true }), queue: [
+    response(settings(3, { showMobileStoreName: false })),
+    response(settings(2, { showMobileStoreName: true })),
+    response(settings(4, { showMobileStoreName: true })),
+  ] })
+  assert.equal(app.value.showMobileStoreName, true)
+  app.effects(); await settle(); app.render()
+  assert.equal(app.value.showMobileStoreName, false)
+  app.focus(); await settle(); app.render()
+  assert.equal(app.value.showMobileStoreName, false)
+  app.focus(); await settle(); app.render()
+  assert.equal(app.value.showMobileStoreName, true)
+  app.unmount()
+})
+
 test('A route change aborts its obsolete request and even an ignored-abort response cannot overwrite the new page', async () => {
   const old = deferred(), latest = deferred()
   const app = mount({ queue: [old.promise, latest.promise] })
@@ -170,6 +186,7 @@ for (const [label, failure] of [
   ['null payload', response(null)],
   ['array payload', response([])],
   ['wrong field type', response(settings(10, { announcementEnabled: 'true' }))],
+  ['non-boolean mobile store-name setting', response(settings(10, { showMobileStoreName: 'false' }))],
   ['invalid revision', response(settings(-1))],
 ]) {
   test(`A ${label} preserves displayed settings and focus can retry successfully`, async () => {

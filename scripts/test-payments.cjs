@@ -40,14 +40,15 @@ class InventoryError extends Error {
 const inventoryKey = item => JSON.stringify([item.productId, item.size, item.color])
 const inventory = {
   InventoryError,
-  releaseInventory: (tx, items) => tx.inventory.release(items),
+  releaseInventory: (tx, items, context) => tx.inventory.release(items, context),
   reserveInventory: (tx, items, options) => tx.inventory.reserve(items, options),
+  recordOrderInventoryEvent: (tx, items, type, context) => tx.inventory.record(items, type, context),
 }
 
 function harness(options = {}) {
   let state = { order: { ...clone(baseOrder), ...clone(options.order ?? {}) },
     receipts: clone(options.receipts ?? []), invoice: clone(options.invoice ?? null), stock: options.stock ?? 8, invoiceCount: 0,
-    variantStocks: clone(options.variantStocks ?? null), inventoryEvents: [],
+    variantStocks: clone(options.variantStocks ?? null), inventoryEvents: [], inventoryContexts: [], stockMovements: [],
     method: { id: 'bank_transfer', name: 'کارت به کارت', description: null, isActive: false,
       cardNumber: null, cardholderName: null, bankName: null, sortOrder: 0, updatedAt: new Date(), ...options.method } }
   let session = options.session === undefined ? { user: { id: 'buyer', role: 'USER' } } : options.session
@@ -103,10 +104,15 @@ function harness(options = {}) {
         },
       },
       inventory: {
-        release: async items => {
+        record: async (items, type, context) => {
+          assert.ok(orderClaimed, 'Inventory events must follow the order state claim')
+          current.stockMovements.push({ items: clone(items), type, context: clone(context) })
+        },
+        release: async (items, context) => {
           assert.ok(orderClaimed, 'Inventory release must follow the order state claim')
           if (options.stockError) throw new Error('inventory update failure')
           current.inventoryEvents.push({ action: 'release', items: clone(items) })
+          current.inventoryContexts.push({ action: 'release', context: clone(context) })
           for (const item of items) {
             current.stock += item.quantity
             if (current.variantStocks) current.variantStocks[inventoryKey(item)] += item.quantity
@@ -124,6 +130,7 @@ function harness(options = {}) {
             })
           }
           current.inventoryEvents.push({ action: 'reserve', items: clone(items) })
+          current.inventoryContexts.push({ action: 'reserve', context: clone(reserveOptions.context) })
           current.stock -= total
           if (current.variantStocks) for (const [key, quantity] of grouped) current.variantStocks[key] -= quantity
           return new Map()
@@ -199,6 +206,9 @@ test('Customer cancellation preserves the order, releases grouped inventory and 
   }
   assert.equal(h.state().stock, 10)
   assert.equal(h.state().order.id, 'order')
+  assert.equal(h.state().inventoryContexts.length,1)
+  assert.equal(h.state().inventoryContexts[0].context.actorId,'buyer')
+  assert.equal(h.state().inventoryContexts[0].context.orderId,'order')
   assert.equal(await h.payments.expireUnpaidOrders(new Date(Date.now() + 600001)), 0)
   assert.equal(h.state().stock, 10)
 })
@@ -264,6 +274,7 @@ test('A cancellation claim lost to another mutation never releases inventory', a
   assert.equal((await h.route('orders/[id]/cancel').POST(cancelRequest(), params)).status, 409)
   assert.equal(h.state().order.status, 'PENDING')
   assert.equal(h.state().stock, 8)
+  assert.equal(h.state().stockMovements.length,0)
 })
 
 test('Cancellation racing expiration releases only the single reservation', async () => {
@@ -439,6 +450,10 @@ test('Approval is admin-only and idempotently records payment, invoice and audit
   assert.equal(h.state().invoiceCount, 1)
   assert.equal(h.state().invoice.snapshot.items[0].productName, 'نام ثبت‌شده')
   assert.equal(h.state().stock, 8)
+  assert.equal(h.state().stockMovements.length,1)
+  assert.equal(h.state().stockMovements[0].type,'SALE')
+  assert.equal(h.state().stockMovements[0].context.actorId,'admin')
+  assert.equal(h.state().stockMovements[0].context.orderId,'order')
 })
 
 test('Payment approval stores the current seller brand once and retries never rewrite an issued invoice', async () => {

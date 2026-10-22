@@ -53,6 +53,8 @@
 .tablePrice { display: grid; gap: 3px; }
 .tablePrice del { color: rgb(var(--theme-muted, 105 116 110)); font-size: 11px; }
 .tablePrice small { color: rgb(var(--theme-brand, 18 102 74)); font-size: 10px; }
+.productCode { display: block; margin-top: 5px; font-size: 11px; font-weight: 400; color: rgb(var(--theme-muted, 105 116 110)); }
+.productCode bdi { overflow-wrap: anywhere; }
 .inventory { min-width: 0; padding: 19px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 23px; background: rgb(var(--theme-surface-soft, 247 250 248)); }
 .inventory legend { padding-inline: 7px; font-size: 14px; font-weight: 750; }
 .inventoryScroll { max-height: 360px; overflow: auto; margin-top: 14px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 17px; background: white; }

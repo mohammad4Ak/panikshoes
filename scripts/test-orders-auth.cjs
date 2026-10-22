@@ -28,6 +28,8 @@ function loadHandler(session, prismaOverrides = {}) {
     '@/lib/shipping': shippingContext.module.exports,
     '@/lib/pricing': pricingContext.module.exports, '@/lib/coupons': couponsContext.module.exports,
     '@/lib/inventory': inventory,
+    '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
+    '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
     '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': {
@@ -84,7 +86,7 @@ test('Checkout accepts every catalog-valid color length through 100 characters',
     })
     const response = await POST(new Request('http://localhost/api/orders', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        items: [{ productId: 'shoe', size: 38, color, quantity: 1 }], address: 'نشانی خریدار', phone: '09123456789',
+        items: [{ productId: 'shoe', size: 38, color, quantity: 1 }], address: 'نشانی خریدار', phone: '09123456789', postalCode: '1234567890',
         paymentMethodId: 'bank_transfer', shippingMethodId: 'post', expectedSubtotal: 100, expectedShippingCost: 0,
       }),
     }))

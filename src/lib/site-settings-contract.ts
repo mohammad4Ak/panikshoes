@@ -141,6 +141,7 @@ export const defaultFooterLinks: FooterLink[] = [
 export const defaultSiteSettings = {
   colorTheme: 'forest' as SiteColorTheme,
   storeName: 'کفش لند',
+  showMobileStoreName: true,
   tagline: 'برای روزهایی که یک‌جا بند نمی‌شی.',
   logoUrl: null as string | null,
   logoLightUrl: null as string | null,

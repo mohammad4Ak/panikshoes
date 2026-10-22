@@ -122,6 +122,17 @@ test('Store name and custom logo appear together in navigation and footer', () =
   }
 })
 
+test('Mobile store-name visibility never removes the desktop brand or accessible logo link', () => {
+  const settings = { storeName: 'کفش پانیک', logoUrl: '/uploads/logo.png' }
+  const visible = render('src/components/layout/Header.tsx', { ...settings, showMobileStoreName: true })
+  assert.match(visible, /class="home-mobile-store-name"[^>]*>کفش پانیک<\/span>/)
+  const hidden = render('src/components/layout/Header.tsx', { ...settings, showMobileStoreName: false })
+  assert.doesNotMatch(hidden, /class="home-mobile-store-name"/)
+  assert.match(hidden, /class="home-header-name[^>]*>کفش پانیک<\/span>/)
+  assert.match(hidden, /aria-label="کفش پانیک" class="home-header-brand/)
+  assert.match(hidden, /src="\/uploads\/logo.png"/)
+})
+
 test('Dark surfaces use the light logo and removing custom logos restores the existing SVG', () => {
   const html = render('src/components/layout/Footer.tsx', {
     logoUrl: '/uploads/logo-dark.png', logoLightUrl: '/uploads/logo-light.png',

@@ -51,8 +51,8 @@
 .tablePanel td { vertical-align: middle; }
 .tablePanel tbody > tr { transition: background .15s; }
 .tablePanel tbody > tr:hover { background: #f5f8f5; }
-.tablePanel :is(button, a)[title] { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 13px; background: rgb(var(--theme-surface-soft, 242 246 243)); }
-.tablePanel :is(button, a)[title]:hover { background: rgb(var(--theme-brand-soft, 225 238 229)); }
+.tablePanel :is(button, a)[title]:not([role='combobox']) { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 13px; background: rgb(var(--theme-surface-soft, 242 246 243)); }
+.tablePanel :is(button, a)[title]:not([role='combobox']):hover { background: rgb(var(--theme-brand-soft, 225 238 229)); }
 .tablePanel select { border-radius: 999px; font-size: 11px; padding: 9px 13px; }
 .searchPanel { padding: 16px; margin-bottom: 20px; border-radius: 24px; background: white; border: 1px solid rgb(var(--theme-brand-soft, 230 236 232)); }
 .searchPanel input { background: #f5f8f6; border-color: transparent; }

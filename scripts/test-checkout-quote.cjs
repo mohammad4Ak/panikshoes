@@ -22,6 +22,7 @@ const contract = load('src/lib/checkout-quote-contract.ts')
 const inventory = load('src/lib/inventory.ts', {
   './api-input': load('src/lib/api-input.ts', { 'next/server': { NextResponse: Response } }),
   './inventory-contract': load('src/lib/inventory-contract.ts'),
+  './stock-movements': load('src/lib/stock-movements.ts'),
 })
 const product = { id: 'shoe', name:'پانیک', price: 100000, salePrice: 80000, saleStartsAt: null, saleEndsAt: null,
   inventoryConfigured:true, variants:[{id:'v',size:38,color:'مشکی',stock:10,isActive:true}] }

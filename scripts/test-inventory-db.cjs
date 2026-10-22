@@ -78,6 +78,7 @@ async function main(){
  }finally{
   await prisma.orderItem.deleteMany({where:{orderId:{in:orderIds}}})
   await prisma.order.deleteMany({where:{id:{in:orderIds}}})
+  await prisma.stockMovement.deleteMany({where:{productId:{in:productIds}}})
   await prisma.productVariant.deleteMany({where:{productId:{in:productIds}}})
   await prisma.product.deleteMany({where:{id:{in:productIds}}})
   await prisma.category.deleteMany({where:{id:categoryId}})

@@ -19,12 +19,14 @@ function compile(file, dependencies, globals = {}) {
 
 const shipping = compile('src/lib/shipping.ts', {})
 const quoteContract = compile('src/lib/checkout-quote-contract.ts', {})
+const contact = compile('src/lib/customer-contact.ts', {})
+const completeProfile = { name: 'مشتری', phone: '09123456789', postalCode: '1234567890' }
 const method = (overrides = {}) => ({ id: 'post', name: 'پست پیشتاز', description: null, baseCost: 50000, additionalItemCost: 10000, freeShippingThreshold: null, isActive: true, sortOrder: 0, ...overrides })
 const currency = (value) => new Intl.NumberFormat('fa-IR').format(value)
 
 // This small hook harness exercises the real checkout handlers without installing a DOM
 // test runtime or contacting auth, the database, payment providers, or delivery services.
-function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer', name: 'کارت به کارت', description: null }], paymentResponses = [], quantity = 3, shippingResponses = [], orderResponses = [], addresses = [], addressResponses = [], addressSavePending = false, authenticated = false, quoteResponses = [], couponDiscount = 0 } = {}) {
+function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer', name: 'کارت به کارت', description: null }], paymentResponses = [], quantity = 3, shippingResponses = [], orderResponses = [], addresses = [], addressResponses = [], addressSavePending = false, authenticated = false, quoteResponses = [], couponDiscount = 0, profileResponses = [], profile = completeProfile } = {}) {
   const slots = []
   const effects = []
   let cursor = 0
@@ -35,6 +37,7 @@ function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer
   const requests = []
   const savedAddressRequests = []
   const addressReads = []
+  const profileReads = []
   const quoteReads = []
   const timers = new Map()
   let timerId = 0
@@ -99,6 +102,17 @@ function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer
   }
   const responses = [methods, ...shippingResponses]
   const fetch = async (url, options) => {
+    if (url === '/api/profile') {
+      profileReads.push({ userId: session?.user.id, signal: options?.signal })
+      let value = profileResponses.length ? profileResponses.shift() : profile
+      if (typeof value === 'function') value = await value(options)
+      else value = await value
+      if (value instanceof Error) throw value
+      if (value && typeof value.json === 'function') return value
+      const status = value?.status ?? 200
+      const data = value && Object.hasOwn(value, 'data') ? value.data : value
+      return { ok: status < 400, status, json: async () => data }
+    }
     if (url === '/api/checkout/quote') {
       const body = JSON.parse(options.body)
       quoteReads.push({ body, signal: options.signal })
@@ -157,6 +171,7 @@ function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer
     '@/lib/cart': { useCart: () => cart }, '@/lib/toast': { toast: () => {} },
     '@/lib/utils': { formatPrice: currency }, '@/lib/shipping': shipping,
     '@/lib/checkout-quote-contract': quoteContract,
+    '@/lib/customer-contact': contact,
     'lucide-react': new Proxy({}, { get: (_, name) => name }),
     '@/components/shop/commerce.module.css': css, '@/components/shop/shipping.module.css': css,
     './coupon.module.css': css,
@@ -179,7 +194,7 @@ function checkout({ methods = [method()], paymentMethods = [{ id: 'bank_transfer
   }
   render()
   return {
-    render, cart, requests, savedAddressRequests, addressReads, quoteReads, removedItems, pushes, cleared: () => cleared,
+    render, cart, requests, savedAddressRequests, addressReads, profileReads, quoteReads, removedItems, pushes, cleared: () => cleared,
     timeoutQuote() { for (const callback of [...timers.values()]) callback(); timers.clear() },
     unmount() { slots.forEach(slot => slot?.cleanup?.()) },
     setUser(userId) { session = userId ? { user: { id: userId } } : null; return render() },
@@ -205,7 +220,18 @@ const radio = (app, id) => find(app, (node) => node.type === 'input' && node.pro
 const summaryTotal = (app) => text(find(app, (node) => node.props.className === 'summaryTotal'))
 const settle = () => new Promise(setImmediate)
 const settleCheckout = async app => { for (let index = 0; index < 4; index++) { await settle(); app.render() } }
-const sendOrder = (app) => find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
+const httpResponse = (data, status = 200) => ({ ok: status < 400, status, json: async () => data })
+const submitForm = (app) => find(app, (node) => node.type === 'form').props.onSubmit({ preventDefault() {} })
+// Shipping/payment regression cases are not contact-validation cases. Supply only
+// missing valid recipient contacts here; contact-specific tests call submitForm.
+const sendOrder = (app) => {
+  for (const [id, value] of [['checkout-phone', completeProfile.phone], ['checkout-postal-code', completeProfile.postalCode]]) {
+    const input = find(app, node => node.props.id === id)
+    if (input && input.props.value === '') { input.props.onChange({ target: { value } }); app.render() }
+  }
+  return submitForm(app)
+}
 
 test('Unavailable, failed, or malformed payment-method lists block checkout and retain the cart', async () => {
   for (const paymentMethods of [[], new Error('offline'), { error: 'bad response' }]) {
@@ -829,4 +855,220 @@ test('A committed attempt with edited recipient details links its existing order
   assert.match(text(app.tree), /سفارش تکراری ساخته نشد/)
   link.props.onClick()
   assert.equal(app.cleared(), true)
+})
+
+test('Authenticated checkout waits for account verification even when delivery contact details are valid', async () => {
+  const pending = deferred()
+  const app = checkout({ authenticated: true, profileResponses: [pending.promise] })
+  await settleCheckout(app)
+  fill(app, 'checkout-phone', '02112345678')
+  fill(app, 'checkout-postal-code', '0123456789')
+  assert.equal(submit(app).props.disabled, true)
+  await submitForm(app); app.render()
+  assert.equal(app.requests.length, 0)
+  assert.equal(app.cleared(), false)
+  assert.ok(find(app, node => node.props.href === '/profile?tab=account'))
+  pending.resolve(httpResponse(completeProfile)); await settleCheckout(app)
+  assert.equal(submit(app).props.disabled, false)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, '02112345678')
+  await submitForm(app)
+  assert.equal(app.requests[0].phone, '02112345678')
+  assert.equal(app.requests[0].postalCode, '0123456789')
+  app.unmount()
+})
+
+for (const profile of [
+  { ...completeProfile, phone: null },
+  { ...completeProfile, phone: '9123456789' },
+  { ...completeProfile, postalCode: null },
+  { ...completeProfile, postalCode: '12345' },
+]) {
+  test(`Valid recipient contacts cannot bypass an incomplete account: ${JSON.stringify(profile)}`, async () => {
+    const app = checkout({ authenticated: true, profile })
+    await settleCheckout(app)
+    fill(app, 'checkout-phone', completeProfile.phone)
+    fill(app, 'checkout-postal-code', completeProfile.postalCode)
+    assert.equal(submit(app).props.disabled, true)
+    await submitForm(app); app.render()
+    assert.equal(app.requests.length, 0)
+    assert.equal(app.cleared(), false)
+    assert.match(text(app.tree), /شماره تلفن و کدپستی معتبر را در حساب کاربری/)
+    app.unmount()
+  })
+}
+
+for (const failure of [
+  { status: 401, data: { error: 'ابتدا وارد حساب شوید' } },
+  { status: 503, data: { error: 'دریافت اطلاعات حساب ممکن نیست' } },
+  new TypeError('Failed to fetch'),
+  { data: { phone: completeProfile.phone, postalCode: completeProfile.postalCode } },
+  { data: { ...completeProfile, phone: { value: completeProfile.phone } } },
+  { data: { ...completeProfile, postalCode: 1234567890 } },
+]) {
+  test(`Account verification failure keeps checkout blocked until an explicit successful retry: ${failure.status || failure.name || 'malformed'}`, async () => {
+    const app = checkout({ authenticated: true, profileResponses: [failure, completeProfile] })
+    await settleCheckout(app)
+    fill(app, 'checkout-phone', completeProfile.phone)
+    fill(app, 'checkout-postal-code', completeProfile.postalCode)
+    await submitForm(app); app.render()
+    assert.equal(app.requests.length, 0)
+    assert.equal(submit(app).props.disabled, true)
+    assert.ok(find(app, node => node.props.href === '/profile?tab=account'))
+    find(app, node => node.type === 'button' && text(node) === 'بررسی دوباره').props.onClick(); app.render()
+    await settleCheckout(app)
+    assert.equal(app.profileReads.length, 2)
+    assert.equal(submit(app).props.disabled, false)
+    await submitForm(app)
+    assert.equal(app.requests.length, 1)
+    assert.equal(app.cleared(), true)
+    app.unmount()
+  })
+}
+
+test('Account profile prefills contacts only after the saved-address list is confirmed empty', async () => {
+  const delayedAddresses = deferred()
+  const app = checkout({ authenticated: true, addresses: delayedAddresses.promise })
+  await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, '')
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '')
+  delayedAddresses.resolve([]); await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, completeProfile.phone)
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, completeProfile.postalCode)
+  app.unmount()
+})
+
+test('A late account profile cannot overwrite a selected recipient address or its postal code', async () => {
+  const pendingProfile = deferred()
+  const app = checkout({ authenticated: true, profileResponses: [pendingProfile.promise], addresses: [{ id: 'delivery', address: 'نشانی گیرنده', phone: '02112345678', postalCode: '0123456789', isDefault: true }] })
+  await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '0123456789')
+  pendingProfile.resolve(httpResponse(completeProfile)); await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '0123456789')
+  await submitForm(app)
+  assert.equal(app.requests[0].phone, '02112345678')
+  assert.equal(app.requests[0].postalCode, '0123456789')
+  assert.equal(app.savedAddressRequests.length, 0)
+  app.unmount()
+})
+
+test('Legacy saved addresses without postal codes require the recipient code instead of inheriting the account code', async () => {
+  const app = checkout({ authenticated: true, addresses: [{ id: 'legacy', title: 'نشانی قدیمی', address: 'نشانی گیرنده', phone: '02112345678', isDefault: true }] })
+  await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '')
+  await submitForm(app); app.render()
+  assert.equal(app.requests.length, 0)
+  assert.match(text(app.tree), /کدپستی ۱۰ رقمی گیرنده/)
+  fill(app, 'checkout-postal-code', '۰۱۲۳۴-۵۶۷۸۹')
+  await submitForm(app)
+  assert.equal(app.requests[0].postalCode, '0123456789')
+  assert.equal(app.requests[0].phone, '02112345678')
+  assert.equal(app.savedAddressRequests.length, 0)
+  app.unmount()
+})
+
+test('Late profile loading cannot overwrite contacts the buyer already entered', async () => {
+  const pendingProfile = deferred()
+  const app = checkout({ authenticated: true, profileResponses: [pendingProfile.promise] })
+  await settleCheckout(app)
+  fill(app, 'checkout-phone', '02112345678')
+  fill(app, 'checkout-postal-code', '0123456789')
+  pendingProfile.resolve(httpResponse(completeProfile)); await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, '02112345678')
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '0123456789')
+  assert.equal(submit(app).props.disabled, false)
+  app.unmount()
+})
+
+test('Changing accounts aborts stale profile verification and prevents the previous reply from filling contact fields', async () => {
+  const oldProfile = deferred()
+  const nextProfile = { ...completeProfile, phone: '09120000002', postalCode: '2234567890' }
+  const app = checkout({ authenticated: true, profileResponses: [oldProfile.promise, nextProfile] })
+  await settleCheckout(app)
+  app.setUser('next-user'); await settleCheckout(app)
+  assert.equal(app.profileReads[0].signal.aborted, true)
+  assert.deepEqual(app.profileReads.map(request => request.userId), ['customer', 'next-user'])
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, nextProfile.phone)
+  oldProfile.resolve(httpResponse(completeProfile)); await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, nextProfile.phone)
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, nextProfile.postalCode)
+  app.unmount()
+})
+
+test('Logout aborts a pending profile response and does not populate the guest recipient form later', async () => {
+  const pending = deferred()
+  const app = checkout({ authenticated: true, profileResponses: [pending.promise] })
+  await settleCheckout(app)
+  app.setUser(null)
+  assert.equal(app.profileReads[0].signal.aborted, true)
+  pending.resolve(httpResponse(completeProfile)); await settleCheckout(app)
+  assert.equal(find(app, node => node.props.id === 'checkout-phone').props.value, '')
+  assert.equal(find(app, node => node.props.id === 'checkout-postal-code').props.value, '')
+  assert.equal(find(app, node => node.props.href === '/profile?tab=account'), undefined)
+  assert.equal(app.requests.length, 0)
+  app.unmount()
+})
+
+for (const contacts of [
+  { phone: '', postalCode: completeProfile.postalCode },
+  { phone: '123', postalCode: completeProfile.postalCode },
+  { phone: completeProfile.phone, postalCode: '' },
+  { phone: completeProfile.phone, postalCode: '12345' },
+  { phone: completeProfile.phone, postalCode: '1111111111' },
+]) {
+  test(`Invalid delivery contacts are rejected even for a complete account: ${JSON.stringify(contacts)}`, async () => {
+    const app = checkout({ authenticated: true })
+    await settleCheckout(app)
+    fill(app, 'checkout-phone', contacts.phone)
+    fill(app, 'checkout-postal-code', contacts.postalCode)
+    await submitForm(app); app.render()
+    assert.equal(app.requests.length, 0)
+    assert.equal(app.cleared(), false)
+    assert.match(text(app.tree), /شماره تلفن معتبر و کدپستی ۱۰ رقمی گیرنده/)
+    app.unmount()
+  })
+}
+
+test('Checkout and optional address saving preserve the recipient postal leading zero with canonical digits', async () => {
+  const app = checkout({ authenticated: true })
+  await settleCheckout(app)
+  fill(app, 'checkout-name', 'گیرنده')
+  fill(app, 'checkout-address', 'نشانی گیرنده')
+  fill(app, 'checkout-phone', '+۹۸ (۹۱۲) ۳۴۵-۶۷۸۹')
+  fill(app, 'checkout-postal-code', '٠١٢٣٤-٥٦٧٨٩')
+  await submitForm(app)
+  assert.equal(app.requests[0].phone, completeProfile.phone)
+  assert.equal(app.requests[0].postalCode, '0123456789')
+  assert.equal(app.savedAddressRequests[0].postalCode, '0123456789')
+  app.unmount()
+})
+
+test('An account becoming incomplete during order creation blocks subsequent submits until rechecked', async () => {
+  const app = checkout({ authenticated: true, orderResponses: [{ status: 409, data: { code: 'PROFILE_INCOMPLETE', error: 'اطلاعات حساب را تکمیل کنید' } }] })
+  await settleCheckout(app)
+  await submitForm(app); app.render(); await settleCheckout(app)
+  assert.equal(app.requests.length, 1)
+  assert.equal(app.cleared(), false)
+  assert.equal(submit(app).props.disabled, true)
+  await submitForm(app)
+  assert.equal(app.requests.length, 1)
+  find(app, node => node.type === 'button' && text(node) === 'بررسی دوباره').props.onClick(); app.render(); await settleCheckout(app)
+  assert.equal(submit(app).props.disabled, false)
+  await submitForm(app)
+  assert.equal(app.requests.length, 2)
+  assert.equal(app.requests[0].checkoutKey, app.requests[1].checkoutKey)
+  app.unmount()
+})
+
+test('Guest checkout makes no profile request and a server login requirement keeps the cart intact', async () => {
+  const app = checkout({ orderResponses: [{ status: 401, data: { error: 'ابتدا وارد حساب شوید' } }] })
+  await settleCheckout(app)
+  fill(app, 'checkout-phone', completeProfile.phone)
+  fill(app, 'checkout-postal-code', completeProfile.postalCode)
+  await submitForm(app); app.render()
+  assert.equal(app.profileReads.length, 0)
+  assert.equal(app.addressReads.length, 0)
+  assert.equal(app.requests.length, 1)
+  assert.equal(app.cleared(), false)
+  assert.ok(find(app, node => node.props.href === '/login'))
+  app.unmount()
 })

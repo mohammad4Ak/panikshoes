@@ -9,7 +9,9 @@ export interface InventoryVariant {
 export const inventoryKey = (productId: string, size: number, color: string) => JSON.stringify([productId, size, color])
 
 export function productInventory<T extends { stock: number; inventoryConfigured: boolean; variants: InventoryVariant[] }>(product: T, admin = false) {
-  const variants = (product.variants ?? []).filter(variant => admin || variant.isActive)
+  const variants = (product.variants ?? []).filter(variant => admin || variant.isActive).map(variant => admin ? variant : {
+    id: variant.id, size: variant.size, color: variant.color, stock: variant.stock, isActive: variant.isActive,
+  })
   return { ...product, variants, stock: product.inventoryConfigured ? product.stock : 0,
     ...(admin && !product.inventoryConfigured ? { legacyStock: product.stock } : {}),
   }

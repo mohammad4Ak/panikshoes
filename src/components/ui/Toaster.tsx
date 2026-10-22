@@ -12,7 +12,7 @@ export default function Toaster() {
 
   return (
     <div
-      className="fixed bottom-6 right-6 z-[100] space-y-3 w-[calc(100vw-3rem)] max-w-sm"
+      className="app-toaster fixed bottom-6 right-6 z-[100] space-y-3 w-[calc(100vw-3rem)] max-w-sm"
       role="status"
       aria-live="polite"
     >

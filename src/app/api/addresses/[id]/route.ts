@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { ApiInputError, apiError, booleanField, optionalText, readJsonObject, textField } from '@/lib/api-input'
 import { addressTransaction, ensureDefaultAddress } from '@/lib/address-transaction'
+import { customerPhoneField, customerPostalCodeField } from '@/lib/customer-contact-input'
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
@@ -11,7 +12,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const body = await readJsonObject(request)
     const title = body.title === undefined ? undefined : optionalText(body.title, 'عنوان', 200)
     const address = body.address === undefined ? undefined : textField(body.address, 'آدرس', 3000)
-    const phone = body.phone === undefined ? undefined : textField(body.phone, 'شماره تماس', 50)
+    const phone = body.phone === undefined ? undefined : customerPhoneField(body.phone)!
+    const postalCode = body.postalCode === undefined ? undefined : customerPostalCodeField(body.postalCode, true)
     const isDefault = body.isDefault === undefined ? undefined : booleanField(body.isDefault, 'آدرس پیش‌فرض')
     const updated = await addressTransaction(async (tx) => {
       const existing = await tx.address.findFirst({ where: { id, userId: session.user.id } })
@@ -20,7 +22,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       await tx.address.update({
         where: { id, userId: session.user.id },
         data: { ...(title !== undefined && { title }), ...(address !== undefined && { address }),
-          ...(phone !== undefined && { phone }), ...(isDefault !== undefined && { isDefault }) },
+          ...(phone !== undefined && { phone }), ...(postalCode !== undefined && { postalCode }), ...(isDefault !== undefined && { isDefault }) },
       })
       await ensureDefaultAddress(tx, session.user.id, isDefault === false ? id : undefined)
       return tx.address.findFirst({ where: { id, userId: session.user.id } })

@@ -163,6 +163,23 @@ const sections = (app) => nodes(app.tree).filter((node) => node.props['data-sett
 const visibleSections = (app) => sections(app).filter((node) => !node.props.hidden).map((node) => node.props['data-settings-section'])
 const logoPreviews = (app) => nodes(app.tree).filter((node) => node.type === 'Image' && node.props.width === 100)
 const bannerPreview = (app) => nodes(app.tree).find((node) => node.props['aria-label'] === 'پیش‌نمایش بنر صفحهٔ اول')
+
+test('Branding toggle saves mobile header visibility and retains the saved value after refresh', async () => {
+  const saved = { ...canonical, showMobileStoreName: false, version: 3 }
+  const app = page({ 'PATCH /api/admin/site-settings': [response(saved)] }, { hash: '#branding' })
+  await settle(); app.render()
+  const control = field(app, 'showMobileStoreName')
+  assert.equal(control.props.checked, true)
+  assert.equal(control.props.role, 'switch')
+  control.props.onChange({ target: { checked: false } }); app.render()
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, false)
+  await submit(app); app.render()
+  assert.equal(JSON.parse(patches(app)[0].body).showMobileStoreName, false)
+  assert.equal(field(app, 'showMobileStoreName').props.checked, false)
+  assert.equal(button(app, 'ذخیره تنظیمات').props.disabled, true)
+  assert.equal(app.refreshes, 1)
+  app.unmount()
+})
 const uploadInput = (app, key = 'logoUrl') => nodes(app.tree).find((node) => node.props.id === `settings-upload-${key}`)
 const choose = (app, file, key) => uploadInput(app, key).props.onChange({ target: { files: [file], value: 'selected' } })
 

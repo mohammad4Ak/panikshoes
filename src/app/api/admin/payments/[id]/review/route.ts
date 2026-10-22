@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { buildInvoiceSnapshot } from '@/lib/invoice'
 import { readSiteSettings } from '@/lib/site-settings'
 import { CouponError, reacquireCouponReservation } from '@/lib/coupons'
-import { InventoryError, reserveInventory } from '@/lib/inventory'
+import { InventoryError, recordOrderInventoryEvent, reserveInventory } from '@/lib/inventory'
 import { nextOrderVersion, paymentDeadline, PaymentError, privatePaymentHeaders, receiptMetadataSelect, requireSameOrigin } from '@/lib/payments'
 
 const details = {
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       })
       if (claimed.count !== 1) throw new PaymentError('این پرداخت هم‌زمان بررسی شده است؛ صفحه را تازه کنید.')
       if (approved && late) {
-        await reserveInventory(tx, order.items, { allowLegacy: true })
+        await reserveInventory(tx, order.items, { allowLegacy: true, context: { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'رزرو مجدد پس از تأیید رسید دیرهنگام' } })
         if (order.couponId) await reacquireCouponReservation(tx, id, order.userId, new Date())
       }
       const reviewedAt = new Date()
@@ -61,6 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const settings = await readSiteSettings(tx)
         await tx.invoice.create({ data: { orderId: id, snapshot: { ...buildInvoiceSnapshot(order, settings.storeName) } } })
       }
+      if (approved) await recordOrderInventoryEvent(tx, order.items, 'SALE', { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'تأیید واریز کارت به کارت توسط مدیر' })
       const updated = await tx.order.findUnique({ where: { id }, include: details })
       return { order: updated, receipt: updated?.receipts.find((candidate) => candidate.id === receipt.id) }
     })

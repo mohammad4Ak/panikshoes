@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Product } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@/lib/auth'
@@ -10,6 +10,8 @@ import { isSameOriginRequest } from '@/lib/request-origin'
 import { allocateDiscount, productPricing } from '@/lib/pricing'
 import { CouponError, normalizeCouponCode, quoteCoupon, reserveCoupon } from '@/lib/coupons'
 import { InventoryError, inventoryKey, reserveInventory } from '@/lib/inventory'
+import { CheckoutProfileError, readCheckoutProfile, requireCheckoutProfile } from '@/lib/checkout-profile'
+import { isValidCustomerPhone, isValidPostalCode, normalizePhone, normalizePostalCode } from '@/lib/customer-contact'
 
 export async function GET() {
   const session = await auth()
@@ -109,7 +111,8 @@ export async function POST(request: Request) {
   }
 
   const address = body.address.trim()
-  const phone = body.phone.trim()
+  const phone = normalizePhone(body.phone)
+  const postalCode = normalizePostalCode(body.postalCode)
   const recipientName = typeof body.recipientName === 'string' ? body.recipientName.trim() : session.user.name?.trim() || null
   const shippingMethodId = body.shippingMethodId.trim()
   const paymentMethodId = body.paymentMethodId
@@ -144,7 +147,15 @@ export async function POST(request: Request) {
 
   const checkoutFingerprint = checkoutKey ? createHash('sha256').update(JSON.stringify({
     // The quote may refresh after a lost response. It is not a new purchase intent.
-    recipientName, address, phone, shippingMethodId, paymentMethodId, ...(couponCode ? { couponCode } : {}),
+    recipientName, address, phone, ...(postalCode ? { postalCode } : {}), shippingMethodId, paymentMethodId, ...(couponCode ? { couponCode } : {}),
+    items: [...items].sort((left, right) => left.productId.localeCompare(right.productId) ||
+      left.size - right.size || left.color.localeCompare(right.color) || left.quantity - right.quantity),
+  })).digest('hex') : null
+
+  // Before postal-code snapshots existed, the signed intent used the original
+  // trimmed phone. Accept only exact old replays, never reuse this for new buys.
+  const legacyFingerprint = checkoutKey && body.postalCode === undefined ? createHash('sha256').update(JSON.stringify({
+    recipientName, address, phone: body.phone.trim(), shippingMethodId, paymentMethodId, ...(couponCode ? { couponCode } : {}),
     items: [...items].sort((left, right) => left.productId.localeCompare(right.productId) ||
       left.size - right.size || left.color.localeCompare(right.color) || left.quantity - right.quantity),
   })).digest('hex') : null
@@ -155,7 +166,8 @@ export async function POST(request: Request) {
       where: { checkoutKey, userId: session.user.id },
       include: { items: true, invoice: { select: { id: true, issuedAt: true } } },
     })
-    if (existing && existing.checkoutFingerprint !== checkoutFingerprint) {
+    if (existing && existing.checkoutFingerprint !== checkoutFingerprint &&
+        !(existing.postalCode == null && legacyFingerprint && existing.checkoutFingerprint === legacyFingerprint)) {
       throw new OrderError('اطلاعات این درخواست با سفارش ثبت‌شده متفاوت است؛ سفارش را دوباره بازبینی کنید', {
         status: 409, code: 'CHECKOUT_KEY_REUSED', existingOrderId: existing.id,
       })
@@ -168,6 +180,10 @@ export async function POST(request: Request) {
     // Return the historical order before reading current stock, prices or carriers.
     const existing = await existingCheckout()
     if (existing) return NextResponse.json(existing)
+    if (!isValidCustomerPhone(phone) || !isValidPostalCode(postalCode)) {
+      return NextResponse.json({ error: 'شماره تلفن و کدپستی ۱۰ رقمی معتبر برای گیرنده وارد کنید.', code: 'RECIPIENT_CONTACT_INVALID' }, { status: 400 })
+    }
+    await readCheckoutProfile(prisma, session.user.id)
     await expireUnpaidOrders(new Date(), undefined, { productIds: [...requestedQuantities.keys()], couponCode })
     // Aggregate sizes/colors of the same product when checking stock.
     const failures: string[] = []
@@ -188,6 +204,7 @@ export async function POST(request: Request) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      await requireCheckoutProfile(tx, session.user.id)
       const paymentMethod = await tx.paymentMethod.findUnique({ where: { id: paymentMethodId } })
       if (!paymentMethod?.isActive || !methodAvailability(paymentMethod).available) {
         throw new OrderError('این روش پرداخت در دسترس نیست؛ روش‌های پرداخت را دوباره دریافت کنید', {
@@ -259,12 +276,15 @@ export async function POST(request: Request) {
       const allocated = allocateDiscount(orderItemsData.map((item) => item.price * item.quantity), coupon.discount)
       orderItemsData.forEach((item, index) => { item.couponDiscount = allocated[index] })
 
-      const reservedVariants = await reserveInventory(tx, items)
+      const orderId = randomUUID()
+      const reservedVariants = await reserveInventory(tx, items, { context: {
+        orderId, actorId: session.user.id, actorName: session.user.name || undefined, note: 'رزرو موجودی هنگام ثبت سفارش',
+      } })
       const reservedItems = orderItemsData.map(item => ({ ...item, variantId: reservedVariants.get(inventoryKey(item.productId, item.size, item.color))! }))
 
       const created = await tx.order.create({
         data: {
-          userId: session.user.id, total, address, phone, recipientName, checkoutKey, checkoutFingerprint,
+          id: orderId, userId: session.user.id, total, address, phone, postalCode, recipientName, checkoutKey, checkoutFingerprint,
           subtotal: grossSubtotal, productDiscount: grossSubtotal - subtotal,
           couponId: coupon.couponId, couponCode: coupon.code, couponDiscount: coupon.discount,
           shippingMethodId: method.id, shippingMethodName: method.name, shippingCost,
@@ -294,6 +314,7 @@ export async function POST(request: Request) {
         }
       }
     }
+    if (error instanceof CheckoutProfileError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     if (error instanceof OrderError) {
       const { status = 400, ...details } = error.details
       return NextResponse.json({ error: error.message, ...details }, { status })

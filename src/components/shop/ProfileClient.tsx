@@ -18,6 +18,7 @@ import {
 import { signOutWithSessionLock as signOut } from '@/lib/session-actions'
 import Link from 'next/link'
 import { formatPrice } from '@/lib/utils'
+import { customerContactComplete, isValidCustomerPhone, isValidPostalCode, normalizePhone, normalizePostalCode } from '@/lib/customer-contact'
 import type { InvoiceMetadata } from '@/lib/invoice'
 import InvoiceDownload from './InvoiceDownload'
 import styles from './account.module.css'
@@ -33,6 +34,7 @@ interface Address {
   title: string | null
   address: string
   phone: string
+  postalCode?: string | null
   isDefault: boolean
 }
 
@@ -64,6 +66,9 @@ interface Order {
   recipientName: string | null
   address: string
   phone: string
+  postalCode?: string | null
+  trackingCode?: string | null
+  trackingRecordedAt?: string | null
   createdAt: string
   invoice?: InvoiceMetadata | null
   items: OrderItem[]
@@ -86,13 +91,13 @@ const paymentLabels: Record<string, string> = {
   UNPAID: 'هنوز تأیید نشده',
 }
 
-const emptyAddrForm = { title: '', address: '', phone: '' }
+const emptyAddrForm = { title: '', address: '', phone: '', postalCode: '' }
 
 export default function ProfileClient({ user }: { user: SessionUser }) {
   const [tab, setTab] = useState<'orders' | 'addresses' | 'account'>('orders')
 
   // حساب من
-  const [accForm, setAccForm] = useState({ name: user.name, phone: '' })
+  const [accForm, setAccForm] = useState({ name: user.name, phone: '', postalCode: '' })
   const [accLoading, setAccLoading] = useState(true)
   const [accLoadError, setAccLoadError] = useState('')
   const [accSaving, setAccSaving] = useState(false)
@@ -118,6 +123,16 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
   const [addrSaving, setAddrSaving] = useState(false)
   const [addrError, setAddrError] = useState('')
   const addressDialog = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const requestedTab = new URLSearchParams(window.location.search).get('tab')
+    let active = true
+    void Promise.resolve().then(() => {
+      if (active && (requestedTab === 'account' || requestedTab === 'addresses' || requestedTab === 'orders')) setTab(requestedTab)
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!addrModal) return
@@ -187,11 +202,11 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
         return response.json()
       })
       .then((data) => {
-        if (typeof data?.name !== 'string' || (data.phone !== null && typeof data.phone !== 'string')) {
+        if (typeof data?.name !== 'string' || (data.phone !== null && typeof data.phone !== 'string') || (data.postalCode != null && typeof data.postalCode !== 'string')) {
           throw new Error('Invalid profile response')
         }
         if (controller.signal.aborted) return
-        setAccForm({ name: data.name, phone: data.phone ?? '' })
+        setAccForm({ name: data.name, phone: data.phone ?? '', postalCode: data.postalCode ?? '' })
         accountReady.current = true
       })
       .catch(() => {
@@ -221,6 +236,10 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
   const handleAccountSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!accountReady.current || accountSavePending.current) return
+    if (!customerContactComplete(accForm.phone, accForm.postalCode)) {
+      setAccMsg('شماره تلفن معتبر و کدپستی ۱۰ رقمی را وارد کن؛ این اطلاعات برای ثبت سفارش لازم است.')
+      return
+    }
     accountSavePending.current = true
     setAccSaving(true)
     setAccMsg('')
@@ -228,7 +247,7 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
       const res = await fetch('/api/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(accForm),
+        body: JSON.stringify({ ...accForm, phone: normalizePhone(accForm.phone), postalCode: normalizePostalCode(accForm.postalCode) }),
       })
       if (res.ok) {
         setAccMsg('اطلاعات حساب ذخیره شد ✓')
@@ -272,8 +291,9 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
         return
       }
 
-      setPwSuccess('رمز عبور با موفقیت تغییر کرد ✓')
+      setPwSuccess('رمز عبور با موفقیت تغییر کرد ✓ برای امنیت حساب دوباره وارد شو.')
       setPwForm({ current: '', next: '', confirm: '' })
+      await signOut({ redirectTo: '/login' })
     } catch {
       setPwError('خطای ارتباط با سرور')
     } finally {
@@ -289,7 +309,7 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
   const openAddrModal = (addr?: Address) => {
     if (addr) {
       setEditingAddrId(addr.id)
-      setAddrForm({ title: addr.title ?? '', address: addr.address, phone: addr.phone })
+      setAddrForm({ title: addr.title ?? '', address: addr.address, phone: addr.phone, postalCode: addr.postalCode ?? '' })
       setAddrIsDefault(addr.isDefault)
     } else {
       setEditingAddrId(null)
@@ -302,10 +322,15 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
 
   const handleAddrSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (addrSaving) return
+    if (!isValidCustomerPhone(addrForm.phone) || !isValidPostalCode(addrForm.postalCode)) {
+      setAddrError('شماره تلفن معتبر و کدپستی ۱۰ رقمی این نشانی را وارد کن.')
+      return
+    }
     setAddrSaving(true)
     setAddrError('')
     try {
-      const payload = { ...addrForm, isDefault: addrIsDefault }
+      const payload = { ...addrForm, phone: normalizePhone(addrForm.phone), postalCode: normalizePostalCode(addrForm.postalCode), isDefault: addrIsDefault }
       const res = await fetch(editingAddrId ? `/api/addresses/${editingAddrId}` : '/api/addresses', {
         method: editingAddrId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -444,11 +469,12 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
                         <p className="flex justify-between gap-3"><span className="text-mist">پرداخت</span><span>{order.verified ? 'تأییدشده' : paymentLabels[order.paymentStatus ?? ''] ?? 'هنوز تأیید نشده'}</span></p>
                         {order.paymentMethod === 'bank_transfer' && <p className="flex justify-between gap-3"><span className="text-mist">روش پرداخت</span><span>کارت‌به‌کارت / انتقال وجه</span></p>}
                         <p className="flex justify-between gap-3"><span className="text-mist">روش ارسال</span><span>{order.shippingMethodName || 'ثبت نشده'}</span></p>
+                        {order.trackingCode && ['SHIPPED', 'DELIVERED'].includes(order.status) && <div className={styles.tracking}><strong>کد رهگیری مرسوله</strong><bdi dir="ltr">{order.trackingCode}</bdi><small>این کد را برای پیگیری مرسوله نزد شرکت ارسال‌کننده نگه دار.</small></div>}
                         <p className="flex justify-between gap-3"><span className="text-mist">هزینهٔ ارسال</span><span>{order.shippingCost === 0 ? 'رایگان' : `${formatPrice(order.shippingCost)} تومان`}</span></p>
                         <p className="flex justify-between gap-3 font-bold"><span>مجموع سفارش</span><span>{formatPrice(order.total)} تومان</span></p>
                       </div>
                       <p className="text-xs text-mist pt-2 border-t border-line/60">
-                        {order.recipientName && <>گیرنده: {order.recipientName}<br /></>}ارسال به: {order.address}
+                        {order.recipientName && <>گیرنده: {order.recipientName}<br /></>}ارسال به: {order.address}{order.postalCode && <><br />کدپستی: <bdi dir="ltr">{order.postalCode}</bdi></>}
                       </p>
                       {order.paymentMethod === 'bank_transfer' && (
                         <Link href={`/payment/transfer/${encodeURIComponent(order.id)}`} className={styles.pillLink}>
@@ -538,6 +564,7 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
             <div className={styles.sectionTop}><div><h2>حساب کاربری</h2><p>اطلاعاتت رو به‌روز نگه دار و امنیت حسابت رو مدیریت کن.</p></div></div>
             <form onSubmit={handleAccountSave} className="card p-6 space-y-5" aria-busy={accLoading || accSaving}>
               <h3 className="font-bold text-lg">اطلاعات حساب</h3>
+              <p className="text-sm text-mist">پیش از ثبت سفارش، شماره تلفن و کدپستی معتبر را در حساب خودت ثبت کن.</p>
 
               {accLoading && <p role="status" className="text-sm text-mist">در حال بارگذاری اطلاعات حساب…</p>}
               {accLoadError && (
@@ -567,11 +594,13 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
               </div>
 
               <div>
-                <label htmlFor="account-phone" className="block font-bold mb-2">شماره تماس</label>
+                <label htmlFor="account-phone" className="block font-bold mb-2">شماره تماس *</label>
                 <input
                   id="account-phone"
                   autoComplete="tel"
                   type="tel"
+                  required
+                  maxLength={30}
                   disabled={accLoading || !!accLoadError || accSaving}
                   dir="ltr"
                   className="input-field"
@@ -579,6 +608,11 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
                   value={accForm.phone}
                   onChange={(e) => setAccForm({ ...accForm, phone: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <label htmlFor="account-postal-code" className="block font-bold mb-2">کدپستی *</label>
+                <input id="account-postal-code" autoComplete="postal-code" type="text" inputMode="numeric" required maxLength={16} dir="ltr" disabled={accLoading || !!accLoadError || accSaving} className="input-field" placeholder="کدپستی ۱۰ رقمی" value={accForm.postalCode} onChange={event => setAccForm({ ...accForm, postalCode: event.target.value })} />
               </div>
 
               {accMsg && (
@@ -740,6 +774,11 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
                   value={addrForm.phone}
                   onChange={(e) => setAddrForm({ ...addrForm, phone: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <label htmlFor="address-postal-code" className="block font-bold mb-2">کدپستی این نشانی *</label>
+                <input id="address-postal-code" autoComplete="postal-code" type="text" inputMode="numeric" required maxLength={16} dir="ltr" className="input-field" placeholder="کدپستی ۱۰ رقمی" value={addrForm.postalCode} onChange={event => setAddrForm({ ...addrForm, postalCode: event.target.value })} />
               </div>
 
               <label className="flex items-center gap-3 cursor-pointer">

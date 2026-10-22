@@ -28,7 +28,7 @@ const method = { id: 'post', name: 'پست پیشتاز', baseCost: 50000, addit
 const product = { id: 'shoe', name: 'کفش', price: 100000, stock: 10, sizes: [42, 43], colors: ['سبز', 'مشکی'] }
 const item = { productId: 'shoe', quantity: 2, size: 42, color: 'سبز' }
 const paymentMethod = { id: 'bank_transfer', isActive: true, cardNumber: '0000000000000000', cardholderName: 'صاحب حساب آزمایشی', bankName: 'بانک آزمایشی' }
-const body = { items: [item], address: 'تهران، خیابان نمونه', phone: '09123456789', shippingMethodId: 'post', paymentMethodId: 'bank_transfer', expectedShippingCost: 60000, expectedSubtotal: 200000 }
+const body = { items: [item], address: 'تهران، خیابان نمونه', phone: '09123456789', postalCode: '1234567890', shippingMethodId: 'post', paymentMethodId: 'bank_transfer', expectedShippingCost: 60000, expectedSubtotal: 200000 }
 const checkoutKey = '5f2727c3-580a-4d74-bb95-e0acbd6cb848'
 const request = (body, method = 'POST') => new Request('http://localhost/api/orders', {
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -95,6 +95,8 @@ function createHarness({ products = [product], selectedPaymentMethod = paymentMe
     '@/lib/auth': { auth: async () => session }, '@/lib/shipping': shipping,
     '@/lib/pricing': pricing, '@/lib/coupons': coupons,
     '@/lib/inventory': inventory,
+    '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
+    '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
   return { post: (value) => route.POST(request(value)), committed, reads, mutations }
@@ -271,7 +273,7 @@ test('Concurrent identical checkout keys create and reserve one order, including
 
 test('Reusing a key with changed recipient, delivery or items reconciles the prior order without creating another', async () => {
   for (const changed of [
-    { recipientName: 'نام تازه' }, { address: 'آدرس تازه' }, { phone: '09121111111' },
+    { recipientName: 'نام تازه' }, { address: 'آدرس تازه' }, { phone: '09121111111', postalCode: '1234567890' },
     { shippingMethodId: 'tipax' },
     { items: [{ ...item, size: 43 }] },
   ]) {
@@ -358,7 +360,7 @@ test('Invalid checkout keys fail before stock changes; requests without keys rem
 
 const order = { id: 'order', status: 'PENDING', verified: false, invoice: null,
   createdAt: new Date('2026-09-29T10:00:00Z'), updatedAt: new Date('2026-10-01T10:00:00Z'),
-  recipientName: 'گیرنده', address: 'تهران', phone: '09123456789',
+  recipientName: 'گیرنده', address: 'تهران', phone: '09123456789', postalCode: '1234567890',
   shippingMethodName: 'پست', shippingCost: 50000, total: 350000,
   user: { name: 'خریدار', email: 'buyer@example.test' },
   items: [
@@ -371,7 +373,7 @@ const order = { id: 'order', status: 'PENDING', verified: false, invoice: null,
 // same order, but a conditional update waits for the winner and rechecks its filter.
 function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
   session = { user: { id: 'admin', role: 'ADMIN' } }, failDelete = false, failInvoice = false, storeName = 'کفش لند' } = {}) {
-  const committed = { order: clone(initial), stocks: clone(stocks), invoices: [] }
+  const committed = { order: clone(initial), stocks: clone(stocks), invoices: [], stockMovements: [] }
   const mutations = []
   let transactions = 0
   let queue = Promise.resolve()
@@ -428,6 +430,7 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
         findUnique: async () => ({ name: 'کفش' }),
       },
       orderItem: { deleteMany: async () => {} },
+      stockMovement: { create: async ({ data }) => { assert.ok(draft, 'Ledger events require the claimed order transaction'); draft.stockMovements.push(clone(data)); return clone(data) } },
       invoice: { create: async ({ data }) => {
         assert.ok(draft, 'Invoice issued before the order row was claimed')
         if (failInvoice) throw new Error('invoice failed')
@@ -449,6 +452,8 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
     '@/lib/invoice': invoice,
     '@/lib/coupons': coupons,
     '@/lib/inventory': inventory,
+    '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
+    '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName }) },
   })
   const params = { params: Promise.resolve({ id: 'order' }) }
@@ -497,6 +502,9 @@ test('Legacy order approval snapshots the configured brand and keeps that name o
   assert.equal((await h.patch('SHIPPED')).status, 200)
   assert.equal(h.committed.invoices[0].snapshot.seller.name, 'فروشگاه تازه')
   assert.equal(h.committed.invoices.length, 1)
+  assert.equal(h.committed.stockMovements.filter(row => row.type === 'SALE').length, 2)
+  assert.equal(h.committed.stockMovements.filter(row => row.type === 'SHIPMENT').length, 2)
+  assert.ok(h.committed.stockMovements.every(row => row.actorId === 'admin' && row.orderId === 'order'))
 })
 
 test('Concurrent cancellations restore inventory once; a repeated cancellation is an idempotent no-op', async () => {

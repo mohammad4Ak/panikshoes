@@ -8,6 +8,7 @@ import { SESSION_IDLE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_SECONDS } from './session
 declare module 'next-auth' {
   interface User {
     role?: string
+    authVersion?: number
   }
 
   interface Session {
@@ -24,6 +25,7 @@ declare module 'next-auth' {
 declare module '@auth/core/jwt' {
   interface JWT {
     lastActivityAt?: number
+    authVersion?: number
   }
 }
 
@@ -45,7 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { email: { equals: credentials.email.trim(), mode: 'insensitive' } },
         })
 
-        if (!user) {
+        if (!user || user.isActive === false) {
           return null
         }
 
@@ -63,6 +65,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           role: user.role,
+          authVersion: user.authVersion,
         }
       },
     }),
@@ -94,9 +97,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // check so deleted users and demoted admins lose access immediately.
       const currentUser = await prisma.user.findUnique({
         where: { id },
-        select: { id: true, name: true, email: true, role: true },
+        select: { id: true, name: true, email: true, role: true, isActive: true, authVersion: true },
       })
-      if (!currentUser) return null
+      if (!currentUser || currentUser.isActive === false) return null
+      const currentAuthVersion = currentUser.authVersion ?? 0
+      // Legacy cookies are valid only until the first security change. Checking
+      // the authorize-time version also closes a password-reset/login race.
+      const signedAuthVersion = user ? user.authVersion ?? currentAuthVersion : token.authVersion ?? 0
+      if (!Number.isSafeInteger(signedAuthVersion) || signedAuthVersion !== currentAuthVersion) return null
+      token.authVersion = currentAuthVersion
       token.id = currentUser.id
       token.role = currentUser.role
       token.name = currentUser.name

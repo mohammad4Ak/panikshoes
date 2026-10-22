@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // The floating development badge overlaps the mobile account action.
+  devIndicators: false,
   outputFileTracingIncludes: {
     '/api/orders/*/invoice': ['./src/assets/fonts/Vazirmatn-Regular.ttf', './src/assets/fonts/OFL.txt'],
   },

@@ -150,7 +150,7 @@ test('Specifications retain admin order, normalize text, default only on create 
  assert.deepEqual(plain(specificationsField(specs)), [{ name: 'جنس رویه', value: 'ورنی' }, { name: 'ارتفاع پاشنه', value: '۱۰ سانتی‌متر' }])
  assert.equal(productInput({ name: 'changed' }).specifications, undefined)
  assert.deepEqual(plain(productInput({ specifications: [] }).specifications), [])
- const create = productInput({ name: 'new', price: 1, categoryId: 'cat' }, true)
+ const create = productInput({ code: 'TEST-100', name: 'new', price: 1, categoryId: 'cat' }, true)
  assert.deepEqual(plain(create.specifications), [])
 })
 for (const specifications of [null, {}, [{ name: '', value: 'x' }], [{ name: 'x', value: '' }], [{ name: 'x', value: 'x'.repeat(501) }], Array(31).fill({ name: 'x', value: 'y' }), [{ name: 'Material', value: 'x' }, { name: 'ｍaterial', value: 'y' }]]) test('Invalid specification arrays cannot reach database ' + JSON.stringify(specifications).slice(0, 60), () => {

@@ -68,7 +68,7 @@ export async function expireUnpaidOrders(now = new Date(), orderId?: string, sco
           data: { status: 'CANCELLED', paymentStatus: 'EXPIRED', paymentExpiresAt: null, updatedAt: nextOrderVersion(order.updatedAt) },
         })
         if (claimed.count !== 1) return 0
-        await releaseInventory(tx, order.items)
+        await releaseInventory(tx, order.items, { orderId: order.id, note: 'آزادسازی رزرو به دلیل پایان مهلت پرداخت' })
         if (order.couponId) await releaseCouponReservation(tx, order.id, now)
         return 1
       })
@@ -129,7 +129,7 @@ export async function cancelUnpaidOrder(orderId: string, userId: string) {
       if (latest?.userId === userId && alreadyCancelled(latest)) return cancellationDetails(latest)
       throw new PaymentError('وضعیت پرداخت هم‌زمان تغییر کرده است. صفحه را تازه کنید.', 409, 'PAYMENT_STATE_CHANGED')
     }
-    await releaseInventory(tx, order.items)
+    await releaseInventory(tx, order.items, { orderId: order.id, actorId: userId, note: 'انصراف خریدار از پرداخت' })
     if (order.couponId) await releaseCouponReservation(tx, order.id, new Date())
     return cancellationDetails({ ...order, status: 'CANCELLED', paymentStatus: 'UNPAID', paymentExpiresAt: null, updatedAt })
   })

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { ApiInputError, integerField, textField } from './api-input'
 import { inventoryKey } from './inventory-contract'
+import { recordStockMovement, type MovementContext } from './stock-movements'
 export { inventoryKey } from './inventory-contract'
 
 export class InventoryError extends Error {
@@ -62,7 +63,7 @@ export function assertInventoryAvailable(product: { id: string; name: string; in
 }
 
 /** Parent product locks serialize all edits/movements; variant guards prevent overselling a combination. */
-export async function reserveInventory(tx: Prisma.TransactionClient, items: InventoryItem[], options: { allowLegacy?: boolean } = {}): Promise<Map<string, string>> {
+export async function reserveInventory(tx: Prisma.TransactionClient, items: InventoryItem[], options: { allowLegacy?: boolean; context?: MovementContext } = {}): Promise<Map<string, string>> {
   const variants = new Map<string, string>()
   for (const [productId, entries] of groups(items)) {
     // An increment both locks and invalidates every stale admin inventory form.
@@ -76,6 +77,12 @@ export async function reserveInventory(tx: Prisma.TransactionClient, items: Inve
       if (!options.allowLegacy) throw new InventoryError('موجودی رنگ و سایز این محصول هنوز توسط فروشگاه تنظیم نشده است.', 409, 'INVENTORY_NOT_CONFIGURED')
       const changed = await tx.product.updateMany({ where: { id: productId, stock: { gte: quantity } }, data: { stock: { decrement: quantity } } })
       if (changed.count !== 1) throw unavailable(productId, locked.name, entries.values().next().value!)
+      let balance = locked.stock
+      for (const item of entries.values()) {
+        await recordStockMovement(tx, { product: locked, variant: { size: item.size, color: item.color, isActive: true }, type: 'RESERVE', quantity: item.quantity,
+          stockBefore: balance, stockAfter: balance - item.quantity, context: options.context })
+        balance -= item.quantity
+      }
       continue
     }
     for (const [key, item] of [...entries].sort(([left], [right]) => left.localeCompare(right))) {
@@ -84,6 +91,9 @@ export async function reserveInventory(tx: Prisma.TransactionClient, items: Inve
       const changed = await tx.productVariant.updateMany({ where: { id: variant.id, isActive: true, stock: { gte: item.quantity } }, data: { stock: { decrement: item.quantity } } })
       if (changed.count !== 1) throw unavailable(productId, locked.name, item, variant.stock)
       variants.set(key, variant.id)
+      await recordStockMovement(tx, { product: locked, variant, type: 'RESERVE', quantity: item.quantity,
+        stockBefore: variant.stock, stockAfter: variant.stock - item.quantity,
+        damagedBefore: variant.damagedStock, damagedAfter: variant.damagedStock, context: options.context })
     }
     const changed = await tx.product.updateMany({ where: { id: productId, stock: { gte: quantity } }, data: { stock: { decrement: quantity } } })
     if (changed.count !== 1) throw new InventoryError('مجموع موجودی محصول نیاز به بررسی دارد.', 409, 'INVENTORY_CONFLICT')
@@ -92,11 +102,19 @@ export async function reserveInventory(tx: Prisma.TransactionClient, items: Inve
 }
 
 /** Retired variants keep their own returned units; they do not inflate sellable stock. */
-export async function releaseInventory(tx: Prisma.TransactionClient, items: InventoryItem[]): Promise<void> {
+export async function releaseInventory(tx: Prisma.TransactionClient, items: InventoryItem[], context?: MovementContext): Promise<void> {
   for (const [productId, entries] of groups(items)) {
     const product = await tx.product.update({ where: { id: productId }, data: { inventoryVersion: { increment: 1 } } })
     let available = 0
-    if (!product.inventoryConfigured) available = [...entries.values()].reduce((sum, item) => sum + item.quantity, 0)
+    if (!product.inventoryConfigured) {
+      available = [...entries.values()].reduce((sum, item) => sum + item.quantity, 0)
+      let balance = product.stock
+      for (const item of entries.values()) {
+        await recordStockMovement(tx, { product, variant: { size: item.size, color: item.color, isActive: true }, type: 'RELEASE', quantity: item.quantity,
+          stockBefore: balance, stockAfter: balance + item.quantity, context })
+        balance += item.quantity
+      }
+    }
     else for (const item of entries.values()) {
       // Resolve after the parent lock: a legacy order snapshot may predate the
       // administrator's conversion to variants in a concurrent transaction.
@@ -104,6 +122,9 @@ export async function releaseInventory(tx: Prisma.TransactionClient, items: Inve
       if (!variant || (item.variantId && item.variantId !== variant.id)) throw new InventoryError('ترکیب تاریخی سفارش یافت نشد؛ موجودی نیاز به بررسی دارد.', 409, 'INVENTORY_CONFLICT')
       if (variant.stock > MAX_AMOUNT - item.quantity) throw new InventoryError('موجودی ترکیب از سقف مجاز بیشتر می‌شود.', 409, 'INVENTORY_CONFLICT')
       await tx.productVariant.update({ where: { id: variant.id }, data: { stock: { increment: item.quantity } } })
+      await recordStockMovement(tx, { product, variant, type: 'RELEASE', quantity: item.quantity,
+        stockBefore: variant.stock, stockAfter: variant.stock + item.quantity,
+        damagedBefore: variant.damagedStock, damagedAfter: variant.damagedStock, context })
       if (variant.isActive) available += item.quantity
     }
     if (product.stock > MAX_AMOUNT - available) throw new InventoryError('مجموع موجودی از سقف مجاز بیشتر می‌شود.', 409, 'INVENTORY_CONFLICT')
@@ -112,16 +133,44 @@ export async function releaseInventory(tx: Prisma.TransactionClient, items: Inve
 }
 
 /** Explicit admin allocation; historical rows/identities are never deleted or renamed. */
-export async function configureInventory(tx: Prisma.TransactionClient, productId: string, rows: InventoryRow[], expectedVersion: number, dimensions: { sizes: number[]; colors: string[] }) {
+export async function configureInventory(tx: Prisma.TransactionClient, productId: string, rows: InventoryRow[], expectedVersion: number, dimensions: { sizes: number[]; colors: string[] }, context?: MovementContext) {
+  const previous = await tx.product.findUnique({ where: { id: productId }, include: { variants: true } })
+  if (!previous) throw new InventoryError('محصول یافت نشد.', 404, 'PRODUCT_NOT_FOUND')
   const claimed = await tx.product.updateMany({ where: { id: productId, inventoryVersion: expectedVersion }, data: {
     inventoryVersion: { increment: 1 }, inventoryConfigured: true, stock: rows.reduce((sum, row) => sum + row.stock, 0), ...dimensions,
   } })
   if (claimed.count !== 1) throw new InventoryError('موجودی رنگ یا سایز هم‌زمان تغییر کرده است؛ اطلاعات تازه را دریافت و بررسی کنید.', 409, 'PRODUCT_INVENTORY_CHANGED')
+  if (!previous.inventoryConfigured && previous.stock > 0) {
+    // Allocation replaces the old unassigned bucket; it is not a second receipt.
+    // Close that ledger balance before opening the explicit variant balances.
+    await recordStockMovement(tx, { product: previous, type: 'ADJUSTMENT', quantity: previous.stock,
+      stockBefore: previous.stock, stockAfter: 0, activeBefore: false, activeAfter: false,
+      context: { ...context, note: `تخصیص ماندهٔ قدیمی به رنگ و سایز${context?.note ? `؛ ${context.note}` : ''}` } })
+  }
   await tx.productVariant.updateMany({ where: { productId }, data: { isActive: false } })
-  for (const row of rows) await tx.productVariant.upsert({
-    where: { productId_size_color: { productId, size: row.size, color: row.color } },
-    create: { productId, ...row, isActive: true }, update: { stock: row.stock, isActive: true },
-  })
+  const retainedKeys = new Set(rows.map(row => inventoryKey(productId, row.size, row.color)))
+  for (const variant of previous.variants) if (variant.isActive && !retainedKeys.has(inventoryKey(productId, variant.size, variant.color))) {
+    await recordStockMovement(tx, { product: previous, variant, type: 'VARIANT_STATUS', quantity: variant.stock,
+      stockBefore: variant.stock, stockAfter: variant.stock, damagedBefore: variant.damagedStock, damagedAfter: variant.damagedStock,
+      activeBefore: true, activeAfter: false, context })
+  }
+  for (const row of rows) {
+    const before = previous.variants.find(variant => variant.size === row.size && variant.color === row.color)
+    const variant = await tx.productVariant.upsert({
+      where: { productId_size_color: { productId, size: row.size, color: row.color } },
+      create: { productId, ...row, isActive: true }, update: { stock: row.stock, isActive: true },
+    })
+    const stockBefore = before?.stock ?? 0
+    if (!previous.inventoryConfigured || !before || row.stock !== stockBefore) {
+      await recordStockMovement(tx, { product: previous, variant, type: !previous.inventoryConfigured || !before ? 'OPENING' : 'ADJUSTMENT',
+        quantity: Math.abs(row.stock - stockBefore), stockBefore, stockAfter: row.stock,
+        damagedBefore: before?.damagedStock ?? 0, damagedAfter: variant.damagedStock,
+        activeBefore: before?.isActive ?? true, activeAfter: before?.isActive ?? true, context })
+    }
+    if (before && !before.isActive) await recordStockMovement(tx, { product: previous, variant, type: 'VARIANT_STATUS', quantity: row.stock,
+      stockBefore: row.stock, stockAfter: row.stock, damagedBefore: variant.damagedStock, damagedAfter: variant.damagedStock,
+      activeBefore: false, activeAfter: true, context })
+  }
   const historical = await tx.orderItem.findMany({ where: { productId, variantId: null }, select: { size: true, color: true }, distinct: ['size', 'color'] })
   for (const item of historical) {
     const variant = await tx.productVariant.upsert({
@@ -129,5 +178,22 @@ export async function configureInventory(tx: Prisma.TransactionClient, productId
       create: { productId, size: item.size, color: item.color, stock: 0, isActive: false }, update: {},
     })
     await tx.orderItem.updateMany({ where: { productId, size: item.size, color: item.color, variantId: null }, data: { variantId: variant.id } })
+  }
+}
+
+/** Payment/dispatch events describe the existing reservation; they never subtract it twice. */
+export async function recordOrderInventoryEvent(tx: Prisma.TransactionClient, items: InventoryItem[], type: 'SALE' | 'SHIPMENT', context?: MovementContext) {
+  for (const [productId, entries] of groups(items)) {
+    const product = await tx.product.update({ where: { id: productId }, data: { inventoryVersion: { increment: 1 } } })
+    for (const item of entries.values()) {
+      const variant = product.inventoryConfigured
+        ? await tx.productVariant.findUnique({ where: { productId_size_color: { productId, size: item.size, color: item.color } } }) : null
+      if (product.inventoryConfigured && (!variant || (item.variantId && item.variantId !== variant.id))) {
+        throw new InventoryError('ترکیب تاریخی سفارش یافت نشد؛ موجودی نیاز به بررسی دارد.', 409, 'INVENTORY_CONFLICT')
+      }
+      const balance = variant?.stock ?? product.stock
+      await recordStockMovement(tx, { product, variant: variant ?? { size: item.size, color: item.color, isActive: true }, type, quantity: item.quantity,
+        stockBefore: balance, stockAfter: balance, damagedBefore: variant?.damagedStock ?? 0, damagedAfter: variant?.damagedStock ?? 0, context })
+    }
   }
 }

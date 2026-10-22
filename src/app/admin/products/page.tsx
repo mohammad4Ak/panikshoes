@@ -9,6 +9,7 @@ import PersianDatePicker from '@/components/ui/PersianDatePicker'
 import FormattedNumberInput from '@/components/ui/FormattedNumberInput'
 import { formatPrice } from '@/lib/utils'
 import { productPricing } from '@/lib/pricing'
+import { toAsciiDigits } from '@/lib/localized-input'
 import styles from '@/components/admin/admin.module.css'
 import productStyles from './products.module.css'
 
@@ -20,6 +21,7 @@ const specificationNameKey = (name: string) => name.trim().toLocaleLowerCase('fa
 
 interface Product {
   id: string
+  code: string
   name: string
   slug: string
   description: string
@@ -44,6 +46,7 @@ interface Product {
 
 const emptyForm = {
   name: '',
+  code: '',
   description: '',
   price: '',
   salePrice: '',
@@ -60,6 +63,7 @@ const emptyForm = {
 
 const variantKey = (size: number, color: string) => JSON.stringify([size, color])
 const MAX_STOCK = 2_147_483_647
+const normalizeProductSearch = (value: string) => toAsciiDigits(value).trim().toLocaleLowerCase('fa-IR').replace(/ي/g, 'ی').replace(/ك/g, 'ک')
 type InventoryBaseline = { version: number | null; configured: boolean; sizes: number[]; colors: string[]; stocks: Record<string, string>; legacyStock: number }
 
 function inventoryDimensions(sizeText: string, colorText: string) {
@@ -111,6 +115,7 @@ export default function AdminProductsPage() {
   const [reloadKey, setReloadKey] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [originalCode, setOriginalCode] = useState<string | null>(null)
   const [originalInventory, setOriginalInventory] = useState<InventoryBaseline | null>(null)
   const [inventoryTouched, setInventoryTouched] = useState(false)
   const [originalPricing, setOriginalPricing] = useState<Pick<Product, 'price' | 'salePrice' | 'saleStartsAt' | 'saleEndsAt'> | null>(null)
@@ -151,6 +156,7 @@ export default function AdminProductsPage() {
 
   const openCreateModal = () => {
     setEditingId(null)
+    setOriginalCode(null)
     setOriginalInventory(null)
     setInventoryTouched(false)
     setOriginalPricing(null)
@@ -164,6 +170,7 @@ export default function AdminProductsPage() {
 
   const openEditModal = (product: Product) => {
     setEditingId(product.id)
+    setOriginalCode(product.code)
     const inventory = inventoryBaseline(product)
     setOriginalInventory(inventory)
     setInventoryTouched(false)
@@ -172,6 +179,7 @@ export default function AdminProductsPage() {
     setPriceConflict(false)
     setForm({
       name: product.name,
+      code: product.code,
       description: product.description,
       price: String(product.price),
       salePrice: product.salePrice == null ? '' : String(product.salePrice),
@@ -213,6 +221,12 @@ export default function AdminProductsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (saving || stockConflict || priceConflict) return
+    const rawCode = form.code.trim()
+    if (!/^[A-Za-z0-9۰-۹٠-٩._-]{1,64}$/.test(rawCode)) {
+      setMessage({ text: 'کد محصول را با حداکثر ۶۴ نویسه وارد کن؛ فقط حروف انگلیسی، عدد و نشانه‌های خط تیره، زیرخط و نقطه مجاز هستند.', error: true })
+      return
+    }
+    const code = toAsciiDigits(rawCode).toUpperCase()
     const dimensions = inventoryDimensions(form.sizes, form.colors)
     if (dimensions.error) {
       setMessage({ text: dimensions.error, error: true })
@@ -269,6 +283,7 @@ export default function AdminProductsPage() {
     const pricingChanged = !originalPricing || Object.entries(pricing).some(([key, value]) => value !== originalPricing[key as keyof typeof originalPricing])
     const payload = {
       name: form.name,
+      ...(!editingId || code !== originalCode ? { code } : {}),
       description: form.description,
       ...(pricingChanged ? { ...pricing, ...(editingId ? { expectedPricing: originalPricing } : {}) } : {}),
       images: form.images,
@@ -348,7 +363,8 @@ export default function AdminProductsPage() {
     }
   }
 
-  const filtered = products.filter((p) => p.name.includes(searchQuery))
+  const normalizedQuery = normalizeProductSearch(searchQuery)
+  const filtered = products.filter((p) => [p.name, p.code].some(value => normalizeProductSearch(value).includes(normalizedQuery)))
   const dimensions = inventoryDimensions(form.sizes, form.colors)
   const inventoryTotal = dimensions.rows.reduce((sum, row) => sum + Number(form.variantStocks[row.key] ?? '0'), 0)
 
@@ -368,8 +384,8 @@ export default function AdminProductsPage() {
       <div className={styles.searchPanel}>
         <input
           type="text"
-          placeholder="جستجو در محصولات..."
-          aria-label="جستجو در محصولات"
+          placeholder="جستجو با نام یا کد محصول..."
+          aria-label="جستجو با نام یا کد محصول"
           className="input-field"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -398,7 +414,7 @@ export default function AdminProductsPage() {
             <tbody className="divide-y divide-line">
               {filtered.map((product) => (
                 <tr key={product.id} className="hover:bg-fog/30">
-                  <td className="px-4 py-3 md:px-6 md:py-4 font-medium">{product.name}</td>
+                  <td className="px-4 py-3 md:px-6 md:py-4 font-medium">{product.name}<small className={productStyles.productCode}>کد: <bdi dir="ltr">{product.code}</bdi></small></td>
                   <td className="px-6 py-4">
                     <span className="px-3 py-1 bg-brand/10 text-brand rounded-full text-sm">
                       {product.category.name}
@@ -476,6 +492,27 @@ export default function AdminProductsPage() {
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <label htmlFor="product-code" className="block font-bold mb-2">کد محصول *</label>
+                <input
+                  id="product-code"
+                  name="code"
+                  type="text"
+                  required
+                  disabled={saving}
+                  dir="ltr"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  maxLength={64}
+                  aria-describedby="product-code-help"
+                  className="input-field"
+                  value={form.code}
+                  onChange={(e) => setForm({ ...form, code: e.target.value })}
+                />
+                <p id="product-code-help" className={`${productStyles.hint} mt-1`}>کد باید یکتا باشد؛ مثل 00622 یا PANIK-622. حروف انگلیسی، اعداد، خط تیره، زیرخط و نقطه مجازند. اعداد فارسی هم پذیرفته می‌شوند و حروف انگلیسی با شکل بزرگ ذخیره می‌شوند.</p>
               </div>
 
               <div>

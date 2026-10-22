@@ -328,7 +328,7 @@ for (const body of invalidProductValues) {
   test(`Product create/update rejects invalid business value before DB access: ${JSON.stringify(body)}`, async () => {
     const { handlers: create } = load('src/app/api/products/route.ts')
     const { handlers: update } = load('src/app/api/products/[id]/route.ts')
-    assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', variants: [], ...body }))).status, 400)
+    assert.equal((await create.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'cat', variants: [], ...body }))).status, 400)
     assert.equal((await update.PUT(request(body), context())).status, 400)
   })
 }
@@ -343,7 +343,7 @@ test('Valid numeric form values normalize without turning false into true', asyn
       return tx.product.create({ ...query, data: { inventoryVersion: 0, inventoryConfigured: false, stock: 0, ...query.data } })
     } } })),
   } })
-  const response = await handlers.POST(request({ name: ' Name ', price: '100', categoryId: 'cat',
+  const response = await handlers.POST(request({ code: 'TEST-100', name: ' Name ', price: '100', categoryId: 'cat',
     sizes: ['40', 40, 41], colors: [' black ', 'black'], images: [], featured: false,
     variants: [{ size: '40', color: ' black ', stock: '2' }, { size: 41, color: 'black', stock: 0 }] }))
   assert.equal(response.status, 201)
@@ -361,9 +361,9 @@ test('Valid numeric form values normalize without turning false into true', asyn
 
 test('New products require explicit complete variant rows rather than an aggregate stock', async () => {
   const { handlers: create } = load('src/app/api/products/route.ts')
-  assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', stock: 1, sizes: [] }))).status, 400)
-  assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: [] }))).status, 400)
-  assert.equal((await create.POST(request({ name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: ['black'], variants: [] }))).status, 400)
+  assert.equal((await create.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'cat', stock: 1, sizes: [] }))).status, 400)
+  assert.equal((await create.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: [] }))).status, 400)
+  assert.equal((await create.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'cat', sizes: [42], colors: ['black'], variants: [] }))).status, 400)
 })
 
 test('Product sale creation rejects invalid money and calendar schedules before writing', async () => {
@@ -377,7 +377,7 @@ test('Product sale creation rejects invalid money and calendar schedules before 
     { saleStartsAt: '2026-10-15T10:00:00Z' },
   ]) {
     const { handlers } = load('src/app/api/products/route.ts')
-    assert.equal((await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'cat', variants: [], ...sale }))).status, 400, JSON.stringify(sale))
+    assert.equal((await handlers.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'cat', variants: [], ...sale }))).status, 400, JSON.stringify(sale))
   }
 })
 
@@ -503,7 +503,7 @@ test('Changing size or color dimensions requires the complete matrix before any 
 
 test('Unknown product category is rejected; unavailable category deletion is 404', async () => {
   const { handlers } = load('src/app/api/products/route.ts', { prisma: { category: { findUnique: async () => null } } })
-  const missingCategory = await handlers.POST(request({ name: 'Name', price: 100, categoryId: 'gone', variants: [] }))
+  const missingCategory = await handlers.POST(request({ code: 'TEST-100', name: 'Name', price: 100, categoryId: 'gone', variants: [] }))
   assert.equal(missingCategory.status, 400)
   assert.match((await missingCategory.json()).error, /دسته بندی نامعتبر/)
   const { handlers: category } = load('src/app/api/categories/[id]/route.ts', {
@@ -529,6 +529,7 @@ function addressDatabase(initial = []) {
   const matches = (row, where) => Object.entries(where).every(([key, value]) =>
     value && typeof value === 'object' && 'not' in value ? row[key] !== value.not : row[key] === value)
   const address = {
+    findMany: async ({ where }) => rows.filter((row) => matches(row, where)),
     findFirst: async ({ where }) => rows.find((row) => matches(row, where)) ?? null,
     updateMany: async ({ where, data }) => { for (const row of rows) if (matches(row, where)) Object.assign(row, data) },
     create: async ({ data }) => { const row = { id: `a${rows.length + 1}`, ...data }; rows.push(row); return row },
@@ -542,7 +543,7 @@ test('Address writes reject blank text, unexpected field types and string boolea
   const { handlers } = load('src/app/api/addresses/route.ts', { session: customer })
   const { handlers: single } = load('src/app/api/addresses/[id]/route.ts', { session: customer })
   for (const body of [{ address: '' }, { phone: {} }, { isDefault: 'false' }, { title: 3 }]) {
-    assert.equal((await handlers.POST(request({ address: 'Home', phone: '123', ...body }))).status, 400)
+    assert.equal((await handlers.POST(request({ address: 'Home', phone: '09123456789', ...body }))).status, 400)
   }
   for (const body of [{ address: '' }, { phone: '' }, { isDefault: 'false' }, { title: [] }]) {
     assert.equal((await single.PATCH(request(body), context())).status, 400)
@@ -552,9 +553,9 @@ test('Address writes reject blank text, unexpected field types and string boolea
 test('First address becomes default and selecting another default clears the old one atomically', async () => {
   const db = addressDatabase()
   const { handlers } = load('src/app/api/addresses/route.ts', { session: customer, prisma: db.prisma })
-  assert.equal((await handlers.POST(request({ address: 'Home', phone: '123', isDefault: false }))).status, 201)
+  assert.equal((await handlers.POST(request({ address: 'Home', phone: '09123456789', isDefault: false }))).status, 201)
   assert.equal(db.rows[0].isDefault, true)
-  assert.equal((await handlers.POST(request({ address: 'Work', phone: '123', isDefault: true }))).status, 201)
+  assert.equal((await handlers.POST(request({ address: 'Work', phone: '09123456789', isDefault: true }))).status, 201)
   assert.equal(db.rows.filter((row) => row.isDefault).length, 1)
   assert.equal(db.rows[1].isDefault, true)
   assert.ok(db.options.every((config) => config.isolationLevel === 'Serializable'))
@@ -628,7 +629,13 @@ test('Password change verifies the existing password and rejects coercion or a t
   let updates = 0
   const prisma = { user: {
     findUnique: async () => ({ id: 'customer', password: 'existing-hash' }),
-    update: async () => { updates++ },
+    updateMany: async (query) => {
+      updates++
+      assert.equal(query.where.password, 'existing-hash')
+      assert.equal(query.where.isActive, true)
+      assert.equal(query.data.authVersion.increment, 1)
+      return { count: 1 }
+    },
   } }
   const { handlers } = load('src/app/api/profile/password/route.ts', {
     session: customer, prisma, bcrypt: { compare: async (value) => value === 'correct' },

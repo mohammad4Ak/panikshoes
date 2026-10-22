@@ -18,6 +18,7 @@ import { signOutWithSessionLock as signOut } from '@/lib/session-actions'
 import { useCart } from '@/lib/cart'
 import { toPersianDigits } from '@/lib/utils'
 import NavSearch from './NavSearch'
+import MobileBottomNav from './MobileBottomNav'
 import BrandLogo from '@/components/ui/BrandLogo'
 import { useSiteSettings } from './SiteSettingsProvider'
 import { useAppSession } from '@/components/auth/SessionActivityProvider'
@@ -90,6 +91,7 @@ export default function Header() {
   if (previousPathname !== pathname) {
     setPreviousPathname(pathname)
     setMenuOpen(false)
+    setSearchOpen(false)
     setHidden(false)
     setScrolled(false)
   }
@@ -129,7 +131,7 @@ export default function Header() {
             }`}
           >
             {/* Logo */}
-            <Link href="/" className="home-header-brand flex min-w-0 items-center gap-2">
+            <Link href="/" aria-label={settings.storeName} className="home-header-brand flex min-w-0 items-center gap-2">
               <span className="home-header-mark shrink-0 flex items-center justify-center" aria-hidden="true">
                 <BrandLogo />
               </span>
@@ -137,6 +139,8 @@ export default function Header() {
                 {settings.storeName}
               </span>
             </Link>
+
+            {settings.showMobileStoreName && <span className="home-mobile-store-name" title={settings.storeName}>{settings.storeName}</span>}
 
             {/* Desktop Links */}
             <nav className="hidden lg:flex items-center gap-1" aria-label="ناوبری اصلی">
@@ -157,12 +161,12 @@ export default function Header() {
             </nav>
 
             {/* Actions */}
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="home-header-actions flex shrink-0 items-center gap-1">
               <button
                 onClick={() => setSearchOpen(true)}
                 aria-label="جستجو"
                 title="جستجو (Ctrl+K)"
-                className="p-2.5 hover:bg-line/70 rounded-full transition-colors"
+                className="hidden lg:inline-flex p-2.5 hover:bg-line/70 rounded-full transition-colors"
               >
                 <Search className="w-[18px] h-[18px] text-night" />
               </button>
@@ -172,7 +176,7 @@ export default function Header() {
                   href="/admin"
                   aria-label="پنل مدیریت"
                   title="پنل مدیریت"
-                  className="hidden sm:inline-flex p-2.5 hover:bg-line/70 rounded-full transition-colors"
+                  className="hidden lg:inline-flex p-2.5 hover:bg-line/70 rounded-full transition-colors"
                 >
                   <LayoutDashboard className="w-[18px] h-[18px] text-night" />
                 </Link>
@@ -182,7 +186,7 @@ export default function Header() {
                 onClick={handleUserClick}
                 aria-label="حساب کاربری"
                 title="حساب کاربری"
-                className="hidden sm:inline-flex p-2.5 hover:bg-line/70 rounded-full transition-colors"
+                className="hidden lg:inline-flex p-2.5 hover:bg-line/70 rounded-full transition-colors"
               >
                 <User className="w-[18px] h-[18px] text-night" />
               </button>
@@ -190,7 +194,7 @@ export default function Header() {
               <Link
                 href="/cart"
                 aria-label="سبد خرید"
-                className="relative p-2.5 hover:bg-line/70 rounded-full transition-colors"
+                className="hidden lg:inline-flex relative p-2.5 hover:bg-line/70 rounded-full transition-colors"
               >
                 <ShoppingBag className="w-[18px] h-[18px] text-night" />
                 {mounted && itemsCount > 0 && (
@@ -216,6 +220,16 @@ export default function Header() {
           </div>
         </div>
       </header>
+
+      <MobileBottomNav
+        pathname={pathname}
+        loggedIn={loggedIn}
+        mounted={mounted}
+        itemsCount={itemsCount}
+        hidden={menuOpen || searchOpen}
+        onSearch={() => setSearchOpen(true)}
+        onAccount={handleUserClick}
+      />
 
       {/* Full-Screen Takeover Menu (Mobile) */}
       {menuOpen && (

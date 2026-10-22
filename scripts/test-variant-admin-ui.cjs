@@ -5,7 +5,7 @@ const path = require('node:path')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
 const category = { id: 'cat', name: 'کتانی' }
-const product = extra => ({ id: 'shoe', name: 'کفش پانیک', slug: 'panik', description: '', price: 100_000, salePrice: null, images: ['/shoe.webp'], sizes: [40, 41], colors: ['مشکی', 'سفید'], stock: 9, inventoryConfigured: true, inventoryVersion: 7, categoryId: 'cat', category, featured: false, specifications: [], variants: [
+const product = extra => ({ id: 'shoe', code: 'PANIK-622', name: 'کفش پانیک', slug: 'panik', description: '', price: 100_000, salePrice: null, images: ['/shoe.webp'], sizes: [40, 41], colors: ['مشکی', 'سفید'], stock: 9, inventoryConfigured: true, inventoryVersion: 7, categoryId: 'cat', category, featured: false, specifications: [], variants: [
   { id: 'v1', size: 40, color: 'مشکی', stock: 2, isActive: true },
   { id: 'v2', size: 40, color: 'سفید', stock: 3, isActive: true },
   { id: 'v3', size: 41, color: 'مشکی', stock: 4, isActive: true },
@@ -27,9 +27,12 @@ function mount(initial = product(), queues = {}) {
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props }
   const pricing = { exports: {} }
   vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/pricing.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: pricing, Date })
+  const localizedInput = { exports: {} }
+  vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/localized-input.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: localizedInput })
   const dependencies = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'next/link': { __esModule: true, default: 'Link' }, 'lucide-react': new Proxy({}, { get: (_, name) => name }),
     '@/lib/utils': { formatPrice: String }, '@/lib/pricing': pricing.exports,
+    '@/lib/localized-input': localizedInput.exports,
     '@/components/admin/MultiImageInput': { __esModule: true, default: 'Images' },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
     '@/components/ui/PersianDatePicker': { __esModule: true, default: ({ onChange, ...props }) => jsx('input', { ...props, onChange: event => onChange(event.target.value) }) },
@@ -99,6 +102,7 @@ test('Legacy stock is never guessed into cells; explicit activation can configur
 })
 test('Creation sends a complete explicit zero-based matrix rather than a legacy total', async () => {
   const app = await ready(); button(app, 'محصول جدید').props.onClick(); app.render()
+  change(app, field(app, 'product-code'), 'PANIK-622')
   assert.equal(cells(app).length, 8); change(app, cell(app, 40, 'مشکی'), '5'); await save(app)
   const payload = JSON.parse(writes(app)[0].body); assert.equal(writes(app)[0].method, 'POST'); assert.equal(payload.variants.length, 8); assert.equal(payload.variants[0].stock, 5); assert.equal(Object.hasOwn(payload, 'stock'), false); assert.equal(Object.hasOwn(payload, 'expectedInventoryVersion'), false); app.unmount()
 })

@@ -25,14 +25,14 @@ const catalogue = [
 ]
 const couponRow = extra => ({ id: 'coupon', code: 'PANIK10', name: 'پیشنهاد پانیک', type: 'PERCENT', value: 10, maxDiscount: null, minSubtotal: 0, maxUses: 20, perUserLimit: 1, startsAt: null, endsAt: null, isActive: true, usedCount: 0, version: 1, deletedAt: null, ...extra })
 const item = (productId = 'p1', quantity = 1) => ({ productId, quantity, size: 38, color: 'مشکی' })
-const body = extra => ({ items: [item()], address: 'نشانی خریدار', phone: '09123456789', shippingMethodId: 'post', paymentMethodId: 'bank_transfer', expectedSubtotal: 80_000, expectedShippingCost: 50_000, couponCode: 'PANIK10', expectedCouponDiscount: 8_000, ...extra })
+const body = extra => ({ items: [item()], address: 'نشانی خریدار', phone: '09123456789', postalCode: '1234567890', shippingMethodId: 'post', paymentMethodId: 'bank_transfer', expectedSubtotal: 80_000, expectedShippingCost: 50_000, couponCode: 'PANIK10', expectedCouponDiscount: 8_000, ...extra })
 const request = (payload, method = 'POST') => new Request('http://localhost/api/orders', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
 const context = id => ({ params: Promise.resolve({ id }) })
 
 // Discount business functions and route handlers are real; inventory is a shared
 // transport double covered separately. Serial transactions/rollback never touch live orders.
 function harness(options = {}) {
-  let state = { products: clone(options.products || catalogue), coupon: couponRow(options.coupon), orders: [], redemptions: [], receipts: [], invoices: [] }
+  let state = { products: clone(options.products || catalogue), coupon: couponRow(options.coupon), orders: [], redemptions: [], receipts: [], invoices: [], stockMovements: [] }
   let session = { user: { id: 'buyer', role: 'USER', name: 'خریدار' } }
   let queue = Promise.resolve()
   const events = []
@@ -87,6 +87,7 @@ function harness(options = {}) {
         delete: async ({ where }) => { current().orders = current().orders.filter(order => order.id !== where.id); current().redemptions = current().redemptions.filter(entry => entry.orderId !== where.id); return {} },
       },
       orderItem: { deleteMany: async () => ({ count: 1 }) },
+      stockMovement: { create: async ({ data }) => { current().stockMovements.push(clone(data)); return clone(data) } },
       coupon: {
         findUnique: async ({ where }) => matches(current().coupon, where) ? clone(current().coupon) : null,
         updateMany: async ({ where, data }) => { if (!matches(current().coupon, where)) return { count: 0 }; change(current().coupon, data); events.push('coupon-claim'); return { count: 1 } },
@@ -117,6 +118,8 @@ function harness(options = {}) {
   const dependencies = { 'next/server': { NextResponse: Response }, '@/lib/auth': { auth: async () => session }, '@/lib/prisma': { prisma },
     '@/lib/shipping': shipping, '@/lib/pricing': pricing, '@/lib/coupons': coupons, '@/lib/payments': payments,
     '@/lib/inventory': inventory,
+    '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
+    '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/payment-contract': contract, '@/lib/request-origin': origin, '@/lib/invoice': invoice,
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName: 'کفش پانیک' }) },
   }

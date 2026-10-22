@@ -6,7 +6,7 @@ import { defaultSiteSettings, isSiteColorTheme, isHomeHeroProductIds, isHomeHero
   isFooterLinks, isFooterBadges, isFooterSocialLinks, resolveFooterSocialLinks, type FooterLink, type FooterBadge, type FooterSocialLink, type SiteSettings, type SiteSettingsValues } from '@/lib/site-settings-contract'
 
 export const siteSettingsSelect = {
-  version: true, colorTheme: true, storeName: true, tagline: true, logoUrl: true, logoLightUrl: true,
+  version: true, colorTheme: true, storeName: true, showMobileStoreName: true, tagline: true, logoUrl: true, logoLightUrl: true,
   footerDescription: true, footerCopyright: true, footerLinks: true, footerBadges: true, footerSocialLinks: true,
   announcementEnabled: true, announcementText: true, announcementLink: true,
   announcementLinkLabel: true, homeHeroProductIds: true, homeHeroIntervalSeconds: true, homeBannerEnabled: true, homeBannerImageUrl: true,
@@ -136,7 +136,8 @@ function socialUrl(value: unknown, kind: 'instagram' | 'telegram' | 'eitaa' | 'w
 }
 
 type FooterSettingKey = 'footerDescription' | 'footerCopyright' | 'footerLinks' | 'footerBadges' | 'footerSocialLinks' | 'eitaaUrl' | 'whatsappUrl'
-type SiteSettingsUpdate = Omit<SiteSettingsValues, FooterSettingKey> & Partial<Pick<SiteSettingsValues, FooterSettingKey>>
+type OptionalSettingKey = FooterSettingKey | 'showMobileStoreName'
+type SiteSettingsUpdate = Omit<SiteSettingsValues, OptionalSettingKey> & Partial<Pick<SiteSettingsValues, OptionalSettingKey>>
 
 function footerLinks(value: unknown): FooterLink[] {
   if (!Array.isArray(value)) throw new SiteSettingsError('لینک‌های فوتر معتبر نیستند.')
@@ -221,7 +222,11 @@ export function parseSiteSettings(body: unknown): { values: SiteSettingsUpdate; 
     seoDescription: text(input.seoDescription, 'توضیحات سایت', 300, true),
   }
   // An older admin tab may still save the original settings shape. Omission
-  // leaves new footer fields untouched in the versioned database update.
+  // leaves newly added fields untouched in the versioned database update.
+  if (Object.hasOwn(input, 'showMobileStoreName')) {
+    if (typeof input.showMobileStoreName !== 'boolean') throw new SiteSettingsError('وضعیت نمایش نام فروشگاه در موبایل معتبر نیست.')
+    values.showMobileStoreName = input.showMobileStoreName
+  }
   if (Object.hasOwn(input, 'footerDescription')) values.footerDescription = text(input.footerDescription, 'توضیح فوتر', 800, false, true)
   if (Object.hasOwn(input, 'footerCopyright')) values.footerCopyright = text(input.footerCopyright, 'متن حقوق فوتر', 200)
   if (Object.hasOwn(input, 'footerLinks')) values.footerLinks = footerLinks(input.footerLinks)

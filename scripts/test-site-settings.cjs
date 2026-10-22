@@ -131,6 +131,65 @@ test('A complete validated save normalizes contacts and invalidates the shared l
   assert.deepEqual(h.invalidated, [['/', 'layout']])
 })
 
+test('Mobile store-name visibility defaults to visible and survives versioned saves and public reads', async () => {
+  assert.equal(contract.defaultSiteSettings.showMobileStoreName, true)
+  assert.equal(contract.initialSiteSettings.showMobileStoreName, true)
+  const h = harness()
+  for (const [version, showMobileStoreName] of [[1, false], [2, true]]) {
+    const response = await h.route('admin/site-settings').PATCH(json(values({ version, showMobileStoreName })))
+    assert.equal(response.status, 200)
+    const saved = await response.json()
+    assert.equal(saved.showMobileStoreName, showMobileStoreName)
+    assert.equal(saved.version, version + 1)
+    assert.equal(h.state().showMobileStoreName, showMobileStoreName)
+    const published = await (await h.route('site-settings').GET()).json()
+    assert.equal(published.showMobileStoreName, showMobileStoreName)
+    assert.equal(contract.isSiteSettings(published), true)
+  }
+  assert.equal(h.invalidated.length, 2)
+})
+
+test('Old admin payloads leave the saved mobile store-name choice unchanged', async () => {
+  const h = harness({ row: { showMobileStoreName: false } })
+  const legacy = values({ tagline: 'شعار تازه' })
+  delete legacy.showMobileStoreName
+  const parsed = h.settings.parseSiteSettings(legacy)
+  assert.equal(Object.hasOwn(parsed.values, 'showMobileStoreName'), false)
+  const response = await h.route('admin/site-settings').PATCH(json(legacy))
+  assert.equal(response.status, 200)
+  const saved = await response.json()
+  assert.equal(saved.showMobileStoreName, false)
+  assert.equal(saved.tagline, legacy.tagline)
+  assert.equal(h.state().showMobileStoreName, false)
+  assert.equal(h.state().version, 2)
+})
+
+test('Supplied non-boolean mobile visibility values are rejected without changing saved settings', async () => {
+  for (const showMobileStoreName of ['false', 'true', 0, 1, null, [], {}, undefined]) {
+    const h = harness({ row: { showMobileStoreName: false } })
+    const input = values({ showMobileStoreName })
+    assert.throws(() => h.settings.parseSiteSettings(input), /وضعیت نمایش نام فروشگاه در موبایل معتبر نیست/)
+    if (showMobileStoreName !== undefined) {
+      assert.equal((await h.route('admin/site-settings').PATCH(json(input))).status, 400)
+      assert.equal(h.metrics().writes, 0)
+      assert.equal(h.state().showMobileStoreName, false)
+      assert.equal(h.state().version, 1)
+    }
+  }
+  for (const showMobileStoreName of ['false', 0, null, undefined]) {
+    assert.equal(contract.isSiteSettings(values({ showMobileStoreName })), false)
+  }
+  const missing = values()
+  delete missing.showMobileStoreName
+  assert.equal(contract.isSiteSettings(missing), false, 'Public responses must include the boolean, unlike older PATCH payloads')
+})
+
+test('Mobile store-name migration adds a non-null visible default without replacing existing settings', () => {
+  const sql = readFileSync(path.join(__dirname, '../prisma/migrations/20261016190000_mobile_store_name/migration.sql'), 'utf8')
+  assert.match(sql, /ALTER TABLE "SiteSettings"\s+ADD COLUMN "showMobileStoreName" BOOLEAN NOT NULL DEFAULT true;/)
+  assert.doesNotMatch(sql, /\b(?:DELETE|TRUNCATE|DROP|UPDATE|INSERT)\b/i)
+})
+
 test('Missing, oversized, malformed and non-boolean fields fail before a database write', async () => {
   const inputs = [null, [], { version: 1 }, values({ version: '1' }), values({ version: 0 }), values({ version: 2147483647 }),
     values({ extra: true }), values({ constructor: 'unexpected' }), values({ toString: 'unexpected' }),

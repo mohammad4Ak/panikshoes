@@ -17,10 +17,14 @@ model User {
   password  String
   role      Role      @default(USER)
   phone     String?
+  postalCode String?
+  isActive Boolean @default(true)
+  authVersion Int @default(0)
   orders    Order[]
   addresses Address[]
   reviews   ProductReview[]
   couponRedemptions CouponRedemption[]
+  stockMovements StockMovement[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
@@ -32,6 +36,7 @@ model Address {
   title     String?
   address   String
   phone     String
+  postalCode String?
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
 }
@@ -47,6 +52,9 @@ model Category {
 
 model Product {
   id          String      @id @default(cuid())
+  // Administrators enter this code; the fallback keeps internal imports compatible.
+  // The migration also enforces case-insensitive uniqueness at the database level.
+  code        String      @unique @default(cuid())
   name        String
   slug        String      @unique
   description String
@@ -64,6 +72,7 @@ model Product {
   inventoryConfigured Boolean @default(false)
   inventoryVersion Int @default(0)
   variants    ProductVariant[]
+  stockMovements StockMovement[]
   featured    Boolean     @default(false)
   specifications Json    @default("[]")
   viewCount   Int         @default(0)
@@ -81,11 +90,64 @@ model ProductVariant {
   size      Int
   color     String
   stock     Int @default(0)
+  damagedStock Int @default(0)
+  lowStockThreshold Int @default(2)
   isActive  Boolean @default(true)
   orderItems OrderItem[]
+  stockMovements StockMovement[]
 
   @@unique([productId, size, color])
   @@index([productId, isActive])
+}
+
+// Immutable movement snapshots survive order deletion and retain the actor's name.
+model StockMovement {
+  id String @id @default(cuid())
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productId String
+  productName String
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  variantId String?
+  size Int?
+  color String?
+  type StockMovementType
+  quantity Int
+  stockBefore Int
+  stockAfter Int
+  damagedBefore Int @default(0)
+  damagedAfter Int @default(0)
+  activeBefore Boolean @default(true)
+  activeAfter Boolean @default(true)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorId String?
+  actorName String
+  // Snapshot only: unpaid orders may be deleted, but their movements must remain.
+  orderId String?
+  note String @default("")
+  requestKey String? @unique
+  fingerprint String?
+  createdAt DateTime @default(now())
+
+  @@index([productId, createdAt])
+  @@index([variantId, createdAt])
+  @@index([orderId])
+  @@index([type, createdAt])
+}
+
+enum StockMovementType {
+  OPENING
+  RECEIPT
+  ADJUSTMENT
+  RESERVE
+  RELEASE
+  SALE
+  RETURN_SELLABLE
+  RETURN_DAMAGED
+  DAMAGE
+  REPAIR
+  DISPOSAL
+  VARIANT_STATUS
+  SHIPMENT
 }
 
 model ProductReview {
@@ -146,6 +208,9 @@ model Order {
   checkoutFingerprint String?
   address            String
   phone              String
+  postalCode         String?
+  trackingCode       String?
+  trackingRecordedAt DateTime?
   shippingMethod     ShippingMethod? @relation(fields: [shippingMethodId], references: [id], onDelete: SetNull)
   shippingMethodId   String?
   shippingMethodName String?
@@ -164,6 +229,8 @@ model Order {
   updatedAt          DateTime        @updatedAt
 
   @@index([shippingMethodId])
+  @@index([phone])
+  @@index([postalCode])
   @@index([couponId])
   @@index([paymentMethod, paymentStatus, paymentExpiresAt])
 }
@@ -290,6 +357,7 @@ model SiteSettings {
   version               Int      @default(1)
   colorTheme            SiteColorTheme @default(forest)
   storeName             String
+    showMobileStoreName   Boolean  @default(true)
   tagline               String
   logoUrl               String?
   logoLightUrl          String?

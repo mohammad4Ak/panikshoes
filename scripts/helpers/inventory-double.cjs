@@ -24,4 +24,7 @@ async function reserveInventory(tx, items) {
 async function releaseInventory(tx, items) {
   for (const [productId, quantity] of totals(items)) await tx.product.update({ where: { id: productId }, data: { stock: { increment: quantity } } })
 }
-module.exports = { InventoryError, inventoryKey, reserveInventory, releaseInventory }
+async function recordOrderInventoryEvent(tx, items, type, context) {
+  for (const item of items) await tx.stockMovement.create({ data: { productId: item.productId, type, quantity: item.quantity, orderId: context?.orderId, actorId: context?.actorId, note: context?.note } })
+}
+module.exports = { InventoryError, inventoryKey, reserveInventory, releaseInventory, recordOrderInventoryEvent }

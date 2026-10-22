@@ -126,8 +126,8 @@ async function main() {
     cwd: root, env: { ...process.env, DATABASE_URL: testUrl }, encoding: 'utf8', timeout: 60000,
   })
   assert.equal(migration.status, 0, 'Test schema migration failed')
-  const buyer = await db.user.create({ data: { email: 'buyer@example.test', name: 'Test buyer', password: 'not-a-login' } })
-  const other = await db.user.create({ data: { email: 'other@example.test', name: 'Other buyer', password: 'not-a-login' } })
+  const buyer = await db.user.create({ data: { email: 'buyer@example.test', name: 'Test buyer', phone: '09120000000', postalCode: '1234567890', password: 'not-a-login' } })
+  const other = await db.user.create({ data: { email: 'other@example.test', name: 'Other buyer', phone: '09120000001', postalCode: '1234567891', password: 'not-a-login' } })
   const admin = await db.user.create({ data: { email: 'admin@example.test', name: 'Test admin', role: 'ADMIN', password: 'not-a-login' } })
   const category = await db.category.create({ data: { name: 'Test', slug: 'test' } })
   const product = await db.product.create({ data: { name: 'Test shoe', slug: 'test-shoe', description: 'Test only', categoryId: category.id,
@@ -213,7 +213,7 @@ async function main() {
   assert.equal((await saveSettings({ storeName: 'Test seller brand' })).version, 4)
   async function checkoutResponse(user = buyer, overrides = {}) {
     const response = await asUser(user, () => orders.POST(json({ items: [{ productId: product.id, size: 42, color: 'green', quantity: 1 }],
-      address: 'Test address', phone: '09120000000', recipientName: 'Test', shippingMethodId: shipping.id,
+      address: 'Test address', phone: '09120000000', postalCode: '1234567890', recipientName: 'Test', shippingMethodId: shipping.id,
       paymentMethodId: 'bank_transfer', expectedShippingCost: 0, expectedSubtotal: 100000, checkoutKey: randomUUID(), ...overrides })))
     const body = await response.json()
     return { response, body }

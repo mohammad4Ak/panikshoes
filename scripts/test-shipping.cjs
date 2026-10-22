@@ -116,6 +116,8 @@ function loadRoute(relativePath, { session = { user: { id: 'admin-1', role: 'ADM
     '@/lib/shipping': shipping,
     '@/lib/pricing': pricing, '@/lib/coupons': coupons,
     '@/lib/inventory': inventory,
+    '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
+    '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/payments': { expireUnpaidOrders: async () => 0, methodAvailability: (method) => ({ available: Boolean(method.cardNumber && method.cardholderName) }) }, '@/lib/payment-contract': { PAYMENT_WINDOW_MS: 600000 },
   })
 }
@@ -253,7 +255,7 @@ function orderHarness({ selectedMethod = method, products, session = { user: { i
 
 const validOrder = {
   items: [{ productId: 'product-1', quantity: 2, size: 42, color: 'مشکی', price: 1 }],
-  address: 'تهران، خیابان نمونه', phone: '09123456789',
+  address: 'تهران، خیابان نمونه', phone: '09123456789', postalCode: '1234567890',
   shippingMethodId: 'shipping-1', paymentMethodId: 'bank_transfer', expectedShippingCost: 105000,
   total: 1, shippingCost: 0, shippingMethodName: 'جعلی',
 }

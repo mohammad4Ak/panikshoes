@@ -105,6 +105,7 @@
 }
 .home-header-mark { width: 120px; height: 40px; background: transparent; }
 .home-header-name { color: rgb(var(--theme-ink, 20 33 28)); font-size: 20px; }
+.home-mobile-store-name { display: none; }
 .home-navigation nav { gap: 6px; }
 .home-navigation nav a { padding: 11px 21px; border-radius: 999px; color: rgb(var(--theme-muted, 105 115 111)); background: transparent; font-size: 13px; }
 .home-navigation nav a[aria-current='page'] { color: rgb(var(--theme-brand, 18 102 74)); background: rgb(var(--theme-brand-soft, 234 243 238)); }
@@ -128,10 +129,24 @@
 
 }
 
+@media (max-width: 1023px) {
+  .home-navigation > div > div { display: grid; grid-template-columns: 102px minmax(0, 1fr) 44px; column-gap: 8px; }
+  .home-header-brand { grid-column: 1; grid-row: 1; justify-self: start; max-width: 100%; }
+  .home-header-mark { width: 102px; height: 40px; }
+  .home-header-name { display: none; }
+  .home-mobile-store-name { grid-column: 2; grid-row: 1; display: block; min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgb(var(--theme-ink, 20 33 28)); font-size: 16px; font-weight: 900; line-height: 1.6; }
+  .home-header-actions { grid-column: 3; grid-row: 1; justify-self: end; }
+  .home-header-actions > button:last-child { width: 44px; height: 44px; }
+}
 @media (max-width: 639px) {
-  .home-header-brand { flex-direction: column; align-items: flex-start; gap: 1px; }
-  .home-header-mark { width: 102px; height: 34px; }
-  .home-header-name { max-width: 120px; font-size: 11px; line-height: 1.3; }
+  .home-navigation > div > div { grid-template-columns: 88px minmax(0, 1fr) 44px; }
+  .home-header-mark { width: 88px; height: 38px; }
+  .home-mobile-store-name { font-size: 15px; }
+}
+@media (max-width: 359px) {
+  .home-navigation > div > div { grid-template-columns: 68px minmax(0, 1fr) 44px; column-gap: 6px; }
+  .home-header-mark { width: 68px; height: 34px; }
+  .home-mobile-store-name { font-size: 14px; }
 }
 
 /* ---------- Home page motion & signature ---------- */
@@ -206,6 +221,10 @@
 }
 
 /* Shared storefront motion; content is visible without JavaScript. */
+@media (max-width: 1023px) {
+  html:has(.shop-shell) { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  body:has(.shop-shell) .app-toaster { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+}
 @media (prefers-reduced-motion: no-preference) {
   html:has(.shop-shell) { scroll-behavior: smooth; scroll-padding-top: 112px; }
   .shop-shell :is(.btn-primary, .btn-secondary, .btn-outline, [data-motion='action'], [data-motion='lift']) {

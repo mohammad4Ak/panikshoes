@@ -8,6 +8,7 @@ import { expireUnpaidOrders } from '@/lib/payments'
 import { productPricing } from '@/lib/pricing'
 import { configureInventory, InventoryError, parseInventoryRows } from '@/lib/inventory'
 import { productInventory } from '@/lib/inventory-contract'
+import { isProductCodeConflict, normalizeProductCode } from '@/lib/product-code'
 
 export async function GET(request: Request) {
   const session = await auth()
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
   const products = await prisma.product.findMany({
     where: {
       ...(q && { OR: [
+        { code: { contains: normalizeProductCode(q).replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' } },
         { name: { contains: q, mode: 'insensitive' } },
         { slug: { contains: q, mode: 'insensitive' } },
         { description: { contains: q, mode: 'insensitive' } },
@@ -51,11 +53,12 @@ export async function POST(request: Request) {
         },
         include: { category: true, variants: true },
       })
-      await configureInventory(tx, created.id, rows, 0, dimensions)
+      await configureInventory(tx, created.id, rows, 0, dimensions, { actorId: session.user.id, actorName: session.user.name || undefined, note: 'ثبت موجودی اولیه هنگام ایجاد محصول' })
       return tx.product.findUniqueOrThrow({ where: { id: created.id }, include: { category: true, variants: true } })
     })
     return NextResponse.json(product, { status: 201 })
   } catch (error) {
+    if (isProductCodeConflict(error)) return NextResponse.json({ error: 'این کد محصول قبلاً استفاده شده است؛ کد دیگری وارد کنید', code: 'PRODUCT_CODE_EXISTS' }, { status: 409 })
     if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return apiError(error, 'خطا در ایجاد محصول')
   }

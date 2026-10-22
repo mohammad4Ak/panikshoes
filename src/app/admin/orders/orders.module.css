@@ -48,6 +48,10 @@
 .customerPhone { display: block; margin-top: 4px; font-size: 10px; font-weight: 400; color: rgb(var(--theme-muted, 105 116 110)); text-align: start; }
 .orderTime { display: block; font-size: 10px; margin-top: 3px; }
 .detailsButton { white-space: nowrap; }
+.statusCell { white-space: nowrap; }
+.statusCell .statusControl { width: 164px; min-width: 164px; }
+.statusCell .statusSelect { width: 164px; min-width: 164px; min-height: 38px; padding: 8px 14px; padding-inline-end: 36px; border: 0; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.8; text-align: start; white-space: nowrap; }
+.statusCell .statusSelect option { background: white; color: rgb(var(--theme-ink, 20 33 28)); }
 .orderDetails { overflow-wrap: anywhere; }
 .orderDetails > div { gap: 14px; flex-wrap: wrap; }
 .orderDetails > p { font-size: 10px; line-height: 1.9; color: rgb(var(--theme-muted, 105 116 110)); }

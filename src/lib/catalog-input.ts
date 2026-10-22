@@ -1,4 +1,5 @@
 import { ApiInputError, booleanField, integerField, optionalText, textField } from './api-input'
+import { productCodeField } from './product-code'
 
 const defaultImage = 'https://images.unsplash.com/photo-1560769629-975ec94e6a86?w=600&q=80'
 
@@ -69,11 +70,12 @@ export function specificationsField(value: unknown): { name: string; value: stri
 
 export function productInput(body: Record<string, unknown>, creating = false) {
   const data: {
-    name?: string; slug?: string; description?: string; price?: number;
+    code?: string; name?: string; slug?: string; description?: string; price?: number;
     salePrice?: number | null; saleStartsAt?: Date | null; saleEndsAt?: Date | null;
     images?: string[]; categoryId?: string; sizes?: number[]; colors?: string[];
     stock?: number; featured?: boolean; specifications?: { name: string; value: string }[];
   } = {}
+  if (creating || body.code !== undefined) data.code = productCodeField(body.code)
   if (creating || body.specifications !== undefined) data.specifications = specificationsField(body.specifications === undefined ? [] : body.specifications)
   if (creating || body.name !== undefined) data.name = textField(body.name, 'نام محصول', 300)
   if (body.slug !== undefined && body.slug !== '') data.slug = textField(body.slug, 'شناسه محصول', 300)

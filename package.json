@@ -23,7 +23,7 @@
     "test:orders-business": "node --test scripts/test-orders-business.cjs",
     "test:catalog-ui": "node --test scripts/test-catalog-ui.cjs",
     "test:session-activity": "node --test scripts/test-session-activity.cjs",
-    "test": "node --test scripts/test-account-catalog.cjs scripts/test-catalog-ui.cjs scripts/test-checkout-shipping.cjs scripts/test-orders-auth.cjs scripts/test-orders-business.cjs scripts/test-payment-result.cjs scripts/test-sales-report.cjs scripts/test-shipping.cjs scripts/test-session-activity.cjs scripts/test-shop-motion.cjs scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-auth-ui.cjs scripts/test-profile-account-ui.cjs scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs scripts/test-request-origin.cjs scripts/test-auth-request-origin.cjs scripts/test-site-settings.cjs scripts/test-site-settings-ui.cjs scripts/test-site-settings-public.cjs scripts/test-site-settings-provider.cjs scripts/test-home-content.cjs scripts/test-admin-settings-navigation.cjs scripts/test-admin-orders.cjs scripts/test-product-reviews.cjs scripts/test-product-engagement-ui.cjs scripts/test-admin-reviews-ui.cjs scripts/test-analytics.cjs scripts/test-home-hero-settings.cjs scripts/test-home-hero-settings-ui.cjs scripts/test-home-hero-carousel.cjs scripts/test-discounts-core.cjs scripts/test-order-discounts.cjs scripts/test-checkout-quote.cjs scripts/test-discount-accounting.cjs scripts/test-admin-coupons-ui.cjs scripts/test-admin-date-filters.cjs scripts/test-persian-inputs.cjs scripts/test-enhanced-select.cjs scripts/test-inventory.cjs scripts/test-variant-shop-ui.cjs scripts/test-variant-admin-ui.cjs",
+    "test": "node --test scripts/test-account-catalog.cjs scripts/test-catalog-ui.cjs scripts/test-checkout-shipping.cjs scripts/test-orders-auth.cjs scripts/test-orders-business.cjs scripts/test-payment-result.cjs scripts/test-sales-report.cjs scripts/test-shipping.cjs scripts/test-session-activity.cjs scripts/test-shop-motion.cjs scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-auth-ui.cjs scripts/test-profile-account-ui.cjs scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs scripts/test-request-origin.cjs scripts/test-auth-request-origin.cjs scripts/test-site-settings.cjs scripts/test-site-settings-ui.cjs scripts/test-site-settings-public.cjs scripts/test-site-settings-provider.cjs scripts/test-home-content.cjs scripts/test-admin-settings-navigation.cjs scripts/test-admin-orders.cjs scripts/test-product-reviews.cjs scripts/test-product-engagement-ui.cjs scripts/test-admin-reviews-ui.cjs scripts/test-analytics.cjs scripts/test-home-hero-settings.cjs scripts/test-home-hero-settings-ui.cjs scripts/test-home-hero-carousel.cjs scripts/test-discounts-core.cjs scripts/test-order-discounts.cjs scripts/test-checkout-quote.cjs scripts/test-discount-accounting.cjs scripts/test-admin-coupons-ui.cjs scripts/test-admin-date-filters.cjs scripts/test-persian-inputs.cjs scripts/test-enhanced-select.cjs scripts/test-inventory.cjs scripts/test-variant-shop-ui.cjs scripts/test-variant-admin-ui.cjs scripts/test-mobile-navigation.cjs scripts/test-warehouse.cjs scripts/test-warehouse-ui.cjs scripts/test-product-code.cjs scripts/test-customer-support.cjs scripts/test-admin-user-support-ui.cjs scripts/test-shipment-import.cjs scripts/test-checkout-profile.cjs",
     "test:invoice": "node --test scripts/test-invoice.cjs scripts/test-invoice-download.cjs scripts/test-invoice-download-ui.cjs scripts/test-discount-accounting.cjs",
     "test:payments": "node --test scripts/test-payments.cjs scripts/test-bank-transfer-ui.cjs scripts/test-admin-payments-ui.cjs scripts/test-payment-expiry.cjs",
     "test:payments:db": "node scripts/test-payments-db.cjs",
@@ -41,7 +41,15 @@
     "test:persian-inputs": "node --test scripts/test-persian-inputs.cjs scripts/test-admin-date-filters.cjs scripts/test-admin-coupons-ui.cjs scripts/test-catalog-ui.cjs",
     "test:select": "node --test scripts/test-enhanced-select.cjs",
     "test:inventory": "node --test scripts/test-inventory.cjs scripts/test-variant-shop-ui.cjs scripts/test-variant-admin-ui.cjs",
-    "test:inventory:db": "node --env-file=.env scripts/test-inventory-db.cjs"
+    "test:inventory:db": "node --env-file=.env scripts/test-inventory-db.cjs",
+    "test:warehouse": "node --test scripts/test-warehouse.cjs scripts/test-warehouse-ui.cjs scripts/test-inventory.cjs",
+    "test:warehouse:db": "node --env-file=.env scripts/test-warehouse-db.cjs",
+    "test:product-code": "node --test scripts/test-product-code.cjs",
+    "test:product-code:db": "node --env-file=.env scripts/test-product-code-db.cjs",
+    "test:customer-support": "node --test scripts/test-customer-support.cjs scripts/test-admin-user-support-ui.cjs scripts/test-checkout-profile.cjs scripts/test-checkout-shipping.cjs scripts/test-profile-account-ui.cjs",
+    "test:shipments": "node --test scripts/test-shipment-import.cjs",
+    "test:shipments:db": "node --env-file=.env scripts/test-shipment-import-db.cjs",
+    "test:checkout-profile:db": "node --env-file=.env scripts/test-checkout-profile-db.cjs"
   },
   "keywords": [
     "فروشگاه",
@@ -58,6 +66,7 @@
     "@vercel/blob": "^2.8.0",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
+    "exceljs": "4.4.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.31.0",
     "next": "^16.3.0",
@@ -83,5 +92,10 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.23.12",
     "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
   }
 }

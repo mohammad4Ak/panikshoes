@@ -8,6 +8,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/cart'
 import { formatPrice } from '@/lib/utils'
+import { customerContactComplete, isValidCustomerPhone, isValidPostalCode, normalizePhone, normalizePostalCode } from '@/lib/customer-contact'
 import { calculateShippingCost, type ShippingMethodOption } from '@/lib/shipping'
 import { isCheckoutQuote, type CheckoutQuote } from '@/lib/checkout-quote-contract'
 import { useAppSession } from '@/components/auth/SessionActivityProvider'
@@ -21,6 +22,7 @@ interface SavedAddress {
   title: string | null
   address: string
   phone: string
+  postalCode?: string | null
   isDefault: boolean
 }
 
@@ -52,11 +54,15 @@ export default function CheckoutPage() {
   const [formData, setFormData] = useState({
     address: '',
     phone: '',
+    postalCode: '',
     name: '',
   })
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [contactReload, setContactReload] = useState(0)
+  const [contactState, setContactState] = useState({ userId: null as string | null, phone: '', postalCode: '', loading: false, error: '' })
+  const profileReady = Boolean(userId) && contactState.userId === userId && !contactState.loading && !contactState.error && customerContactComplete(contactState.phone, contactState.postalCode)
   const [stockUnavailable, setStockUnavailable] = useState(false)
   const [existingOrderId, setExistingOrderId] = useState('')
   const [existingOrderOwner, setExistingOrderOwner] = useState<string | null>(null)
@@ -226,6 +232,34 @@ export default function CheckoutPage() {
   const [selectedAddrId, setSelectedAddrId] = useState<string>('')
   const [newAddressMode, setNewAddressMode] = useState(false)
   const [saveToProfile, setSaveToProfile] = useState(true)
+  const contactDefaults = useRef<{ userId: string; phone: string; postalCode: string } | null>(null)
+  const addressDefaults = useRef<{ userId: string; empty: boolean } | null>(null)
+  const seedContactDefaults = useCallback((id: string) => {
+    const contact = contactDefaults.current
+    if (!contact || contact.userId !== id || addressDefaults.current?.userId !== id || !addressDefaults.current.empty || addressEdited.current) return
+    setFormData(previous => ({ ...previous, phone: contact.phone, postalCode: contact.postalCode }))
+  }, [])
+
+  useEffect(() => {
+    if (!userId) return
+    const controller = new AbortController()
+    fetch('/api/profile', { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        const data = await response.json().catch(() => null)
+        if (!response.ok || !data || typeof data.name !== 'string'
+          || (data.phone != null && typeof data.phone !== 'string')
+          || (data.postalCode != null && typeof data.postalCode !== 'string')) throw new Error(typeof data?.error === 'string' ? data.error : 'دریافت اطلاعات حساب انجام نشد.')
+        if (!controller.signal.aborted) {
+          contactDefaults.current = { userId, phone: data.phone ?? '', postalCode: data.postalCode ?? '' }
+          setContactState({ ...contactDefaults.current, loading: false, error: '' })
+          seedContactDefaults(userId)
+        }
+      })
+      .catch(cause => {
+        if (!controller.signal.aborted) setContactState({ userId, phone: '', postalCode: '', loading: false, error: cause instanceof Error ? cause.message : 'دریافت اطلاعات حساب انجام نشد.' })
+      })
+    return () => controller.abort()
+  }, [userId, contactReload, seedContactDefaults])
 
   // دریافت آدرسهای پروفایل (اگر لاگین باشد)
   useEffect(() => {
@@ -240,6 +274,8 @@ export default function CheckoutPage() {
       .then((list: SavedAddress[]) => {
         if (controller.signal.aborted) return
         setAddressState({ userId, list })
+        addressDefaults.current = { userId, empty: list.length === 0 }
+        seedContactDefaults(userId)
         if (addressEdited.current) {
           setNewAddressMode(true)
         } else if (list.length > 0) {
@@ -248,30 +284,39 @@ export default function CheckoutPage() {
             ...f,
             address: list[0].address,
             phone: list[0].phone,
+            postalCode: list[0].postalCode ?? '',
           }))
         }
       })
       .catch(() => {})
     return () => controller.abort()
-  }, [userId])
+  }, [userId, seedContactDefaults])
 
   const selectAddress = (addr: SavedAddress) => {
     addressEdited.current = true
     setSelectedAddrId(addr.id)
     setNewAddressMode(false)
-    setFormData((f) => ({ ...f, address: addr.address, phone: addr.phone }))
+    setFormData((f) => ({ ...f, address: addr.address, phone: addr.phone, postalCode: addr.postalCode ?? '' }))
   }
 
   const startNewAddress = () => {
     addressEdited.current = true
     setSelectedAddrId('')
     setNewAddressMode(true)
-    setFormData((f) => ({ ...f, address: '', phone: '' }))
+    setFormData((f) => ({ ...f, address: '', phone: contactState.userId === userId ? contactState.phone : '', postalCode: contactState.userId === userId ? contactState.postalCode : '' }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (submitting.current) return
+    if (isLoggedIn && !profileReady) {
+      setError('برای ثبت سفارش، ابتدا شماره تلفن و کدپستی معتبر را در حساب کاربری ثبت کن.')
+      return
+    }
+    if (!isValidCustomerPhone(formData.phone) || !isValidPostalCode(formData.postalCode)) {
+      setError('شماره تلفن معتبر و کدپستی ۱۰ رقمی گیرنده را وارد کن.')
+      return
+    }
     setStockUnavailable(false)
     if (loading || shippingLoading || shippingError || !selectedShipping) {
       setError('برای ثبت سفارش، یک روش ارسال در دسترس انتخاب کن.')
@@ -294,7 +339,8 @@ export default function CheckoutPage() {
       const payload = {
         recipientName: formData.name.trim(),
         address: formData.address.trim(),
-        phone: formData.phone.trim(),
+        phone: normalizePhone(formData.phone),
+        postalCode: normalizePostalCode(formData.postalCode),
         shippingMethodId: selectedShipping.id,
         paymentMethodId: selectedPayment.id,
         expectedShippingCost: quote.shippingCost,
@@ -319,6 +365,11 @@ export default function CheckoutPage() {
       }
 
       if (!res.ok) {
+        if (data.code === 'PROFILE_INCOMPLETE') {
+          setContactState(previous => ({ ...previous, error: data.error || 'اطلاعات حساب را تکمیل کن.' }))
+          setError(data.error || 'ابتدا اطلاعات حساب کاربری را تکمیل کن.')
+          return
+        }
         if (typeof data.code === 'string' && data.code.startsWith('COUPON_')) {
           setQuoteState(previous => ({ ...previous, quote: null, error: '', loading: true }))
           setQuoteReload(previous => previous + 1)
@@ -376,6 +427,7 @@ export default function CheckoutPage() {
               title: 'آدرس من',
               address: formData.address,
               phone: formData.phone,
+              postalCode: normalizePostalCode(formData.postalCode),
             }),
           }).catch(() => {})
       }
@@ -462,6 +514,11 @@ export default function CheckoutPage() {
 
         {/* Checkout Form */}
         <form onSubmit={handleSubmit} className={`${styles.checkoutForm} space-y-6`}>
+          {isLoggedIn && !profileReady && <div className={shippingStyles.state} role="status">
+            <p>{contactState.userId !== userId || contactState.loading ? 'در حال بررسی اطلاعات ضروری حساب…' : contactState.error || 'برای ادامهٔ خرید، شماره تلفن و کدپستی معتبر را در حساب کاربری ثبت کن.'}</p>
+            <Link href="/profile?tab=account" className="underline font-bold">تکمیل اطلاعات حساب</Link>
+            <button type="button" onClick={() => { setContactState(previous => ({ ...previous, loading: true })); setContactReload(value => value + 1) }} disabled={contactState.loading}>بررسی دوباره</button>
+          </div>}
           <h2 className={styles.formTitle}><MapPin size={22} />سفارش رو کجا بفرستیم؟</h2>
           {error && (
             <div ref={errorRef} role="alert" tabIndex={-1} className={`border px-4 py-3 rounded-2xl text-sm leading-7 ${stockUnavailable ? 'bg-amber-50 border-amber-200 text-amber-950' : 'bg-red-50 border-red-200 text-red-700'}`}>
@@ -603,6 +660,12 @@ export default function CheckoutPage() {
             )}
           </div>
 
+          <div>
+            <label htmlFor="checkout-postal-code" className="block font-bold mb-2">کدپستی گیرنده *</label>
+            <input id="checkout-postal-code" autoComplete="postal-code" type="text" inputMode="numeric" required maxLength={16} dir="ltr" className="input-field" placeholder="کدپستی ۱۰ رقمی نشانی تحویل" value={formData.postalCode} onChange={event => { addressEdited.current = true; setFormData({ ...formData, postalCode: event.target.value }) }} />
+            <p className="text-xs text-mist mt-1">کدپستی باید مربوط به نشانی تحویل همین سفارش باشد.</p>
+          </div>
+
           <fieldset className={shippingStyles.section} disabled={loading || shippingLoading}>
             <legend>روش ارسال</legend>
             <p className={shippingStyles.hint}>روش دلخواهت رو انتخاب کن؛ هزینهٔ ارسال در مبلغ نهایی محاسبه می‌شود.</p>
@@ -656,7 +719,7 @@ export default function CheckoutPage() {
 
           <button
             type="submit"
-            disabled={loading || !quoteReady || paymentLoading || Boolean(paymentError) || !selectedPayment}
+            disabled={loading || !quoteReady || paymentLoading || Boolean(paymentError) || !selectedPayment || (isLoggedIn && !profileReady)}
             className="btn-primary w-full text-sm py-4 disabled:opacity-50"
           >
             {loading ? 'در حال ثبت سفارش...' : 'ثبت سفارش و ادامهٔ پرداخت'}

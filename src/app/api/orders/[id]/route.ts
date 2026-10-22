@@ -5,7 +5,7 @@ import { buildInvoiceSnapshot, isInvoiceEligibleStatus } from '@/lib/invoice'
 import { isSameOriginRequest } from '@/lib/request-origin'
 import { readSiteSettings } from '@/lib/site-settings'
 import { CouponError, reacquireCouponReservation, releaseCouponReservation } from '@/lib/coupons'
-import { InventoryError, releaseInventory, reserveInventory } from '@/lib/inventory'
+import { InventoryError, recordOrderInventoryEvent, releaseInventory, reserveInventory } from '@/lib/inventory'
 
 const validStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const
 type OrderStatus = typeof validStatuses[number]
@@ -85,10 +85,10 @@ export async function PATCH(
       if (changed.count !== 1) throw new StatusError('وضعیت سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه کنید')
 
       if (nextStatus === 'CANCELLED') {
-        await releaseInventory(tx, existing.items)
+        await releaseInventory(tx, existing.items, { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'لغو سفارش توسط مدیر' })
         if (existing.couponId && !existing.verified) await releaseCouponReservation(tx, id, new Date())
       } else if (existing.status === 'CANCELLED') {
-        await reserveInventory(tx, existing.items, { allowLegacy: true })
+        await reserveInventory(tx, existing.items, { allowLegacy: true, context: { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'رزرو مجدد پس از بازگشایی سفارش' } })
         if (existing.couponId && !existing.verified) await reacquireCouponReservation(tx, id, existing.userId, new Date())
       }
 
@@ -99,6 +99,10 @@ export async function PATCH(
         await tx.invoice.create({
           data: { orderId: id, snapshot: { ...buildInvoiceSnapshot(existing, settings.storeName) } },
         })
+        await recordOrderInventoryEvent(tx, existing.items, 'SALE', { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'تأیید سفارش و صدور اولین فاکتور' })
+      }
+      if (['SHIPPED', 'DELIVERED'].includes(nextStatus) && !['SHIPPED', 'DELIVERED'].includes(existing.status)) {
+        await recordOrderInventoryEvent(tx, existing.items, 'SHIPMENT', { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'خروج سفارش برای ارسال' })
       }
 
       return tx.order.findUnique({ where: { id }, include: orderDetails })
@@ -143,7 +147,7 @@ export async function DELETE(
       if (claimed.count !== 1) throw new StatusError('وضعیت سفارش هم‌زمان تغییر کرده است؛ صفحه را تازه کنید')
 
       if (order.status !== 'CANCELLED') {
-        await releaseInventory(tx, order.items)
+        await releaseInventory(tx, order.items, { orderId: id, actorId: session.user.id, actorName: session.user.name || undefined, note: 'آزادسازی رزرو هنگام حذف سفارش پرداخت‌نشده' })
       }
 
       if (order.couponId) await releaseCouponReservation(tx, id, new Date())

@@ -7,6 +7,7 @@ import { productInput, productPricingSnapshot, validateProductSale } from '@/lib
 import { productPricing } from '@/lib/pricing'
 import { configureInventory, InventoryError, parseInventoryRows } from '@/lib/inventory'
 import { productInventory } from '@/lib/inventory-contract'
+import { isProductCodeConflict } from '@/lib/product-code'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
@@ -56,7 +57,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // validation depends on the current inventory. A read-then-write is not enough.
     try {
       const product = await prisma.$transaction(async tx => {
-        if (rows && expectedVersion !== null) await configureInventory(tx, id, rows, expectedVersion, dimensions)
+        if (rows && expectedVersion !== null) await configureInventory(tx, id, rows, expectedVersion, dimensions, { actorId: session.user.id, actorName: session.user.name || undefined, note: 'اصلاح موجودی در فرم ویرایش محصول' })
         return tx.product.update({
           where: { id, ...expectedPricing }, data, include: { category: true, variants: true },
         })
@@ -67,6 +68,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       throw error
     }
   } catch (error) {
+    if (isProductCodeConflict(error)) return NextResponse.json({ error: 'این کد محصول قبلاً استفاده شده است؛ کد دیگری وارد کنید', code: 'PRODUCT_CODE_EXISTS' }, { status: 409 })
     if (error instanceof InventoryError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return apiError(error, 'خطا در ویرایش محصول')
   }
@@ -80,9 +82,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   try {
     const { id } = await params
     await prisma.$transaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id }, include: { _count: { select: { orderItems: true } } } })
+      const product = await tx.product.findUnique({ where: { id }, include: { _count: { select: { orderItems: true, stockMovements: true } } } })
       if (!product) throw new ApiInputError('محصول یافت نشد', 404)
       if (product._count.orderItems > 0) throw new ApiInputError('این محصول سابقه سفارش دارد و برای حفظ سوابق فروش قابل حذف نیست', 409)
+      if (product._count.stockMovements > 0) throw new ApiInputError('این محصول سابقه گردش موجودی دارد و برای حفظ سوابق انبار قابل حذف نیست', 409)
       await tx.product.delete({ where: { id } })
     })
     return NextResponse.json({ success: true })

@@ -4,10 +4,12 @@ const path = require('node:path')
 const { test } = require('node:test')
 const vm = require('node:vm')
 const { transformSync } = require('esbuild')
+const contactModule = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/customer-contact.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: contactModule })
 
 // Execute the actual profile component with isolated hooks and responses; no DB writes.
 const user = { name: 'نام قبلی', email: 'customer@example.test', role: 'USER' }
-const profile = { name: 'نام فعلی', phone: '09123456789' }
+const profile = { name: 'نام فعلی', phone: '09123456789', postalCode: '1234567890' }
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data })
 const settle = () => new Promise(setImmediate)
 const deferred = () => {
@@ -51,6 +53,7 @@ function page(queues = {}) {
     'next/link': { __esModule: true, default: 'Link' },
     '@/lib/session-actions': { signOutWithSessionLock: async () => {} },
     '@/lib/utils': { formatPrice: String },
+    '@/lib/customer-contact': contactModule.exports,
     './InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
     './account.module.css': { __esModule: true, default: new Proxy({}, { get: (_, name) => name }) },
   }
@@ -103,6 +106,7 @@ test('Delayed profile load cannot save an empty placeholder phone and fills cano
   const app = page({ 'GET /api/profile': [load.promise] })
   assert.equal(field(app, 'name').props.disabled, true)
   assert.equal(field(app, 'phone').props.disabled, true)
+  assert.equal(field(app, 'postal-code').props.disabled, true)
   assert.equal(save(app).props.disabled, true)
   assert.match(text(app.tree), /در حال بارگذاری اطلاعات حساب/)
   await submit(app)
@@ -110,10 +114,11 @@ test('Delayed profile load cannot save an empty placeholder phone and fills cano
   load.resolve(response(profile)); await settle(); app.render()
   assert.equal(field(app, 'name').props.value, profile.name)
   assert.equal(field(app, 'phone').props.value, profile.phone)
+  assert.equal(field(app, 'postal-code').props.value, profile.postalCode)
   assert.equal(field(app, 'phone').props.disabled, false)
   field(app, 'name').props.onChange({ target: { value: 'نام جدید' } }); app.render()
   await submit(app)
-  assert.deepEqual(JSON.parse(writes(app)[0].body), { name: 'نام جدید', phone: profile.phone })
+  assert.deepEqual(JSON.parse(writes(app)[0].body), { name: 'نام جدید', phone: profile.phone, postalCode: profile.postalCode })
   app.unmount()
 })
 
@@ -141,7 +146,7 @@ for (const [label, failure] of [
   })
 }
 
-test('Only an intentional phone edit can clear a loaded phone; null phones also load as editable empty fields', async () => {
+test('Loaded or legacy null phones remain editable, but a phone must be repaired before saving purchase details', async () => {
   for (const phone of [profile.phone, null]) {
     const app = page({ 'GET /api/profile': [response({ ...profile, phone })] })
     await settle(); app.render()
@@ -149,9 +154,40 @@ test('Only an intentional phone edit can clear a loaded phone; null phones also 
     assert.equal(save(app).props.disabled, false)
     field(app, 'phone').props.onChange({ target: { value: '' } }); app.render()
     await submit(app)
-    assert.equal(JSON.parse(writes(app)[0].body).phone, '')
+    assert.equal(writes(app).length, 0)
+    app.render()
+    assert.match(text(app.tree), /شماره تلفن معتبر و کدپستی ۱۰ رقمی/)
+    field(app, 'phone').props.onChange({ target: { value: profile.phone } }); app.render()
+    await submit(app)
+    assert.equal(JSON.parse(writes(app)[0].body).phone, profile.phone)
     app.unmount()
   }
+})
+
+for (const postalCode of ['', '12345', 'not-a-code', '1111111111']) {
+  test(`Invalid postal code is rejected before writing the account: ${JSON.stringify(postalCode)}`, async () => {
+    const app = page()
+    await settle(); app.render()
+    field(app, 'postal-code').props.onChange({ target: { value: postalCode } }); app.render()
+    await submit(app); app.render()
+    assert.equal(writes(app).length, 0)
+    assert.equal(field(app, 'postal-code').props.value, postalCode)
+    assert.match(text(app.tree), /شماره تلفن معتبر و کدپستی ۱۰ رقمی/)
+    field(app, 'postal-code').props.onChange({ target: { value: profile.postalCode } }); app.render()
+    await submit(app)
+    assert.equal(writes(app).length, 1)
+    app.unmount()
+  })
+}
+
+test('Persian/Arabic digits and an international phone are sent canonically without losing postal leading zero', async () => {
+  const app = page()
+  await settle(); app.render()
+  field(app, 'phone').props.onChange({ target: { value: '+۹۸ (۹۱۲) ۳۴۵-۶۷۸۹' } }); app.render()
+  field(app, 'postal-code').props.onChange({ target: { value: '٠١٢٣٤-٥٦٧٨٩' } }); app.render()
+  await submit(app)
+  assert.deepEqual(JSON.parse(writes(app)[0].body), { name: profile.name, phone: profile.phone, postalCode: '0123456789' })
+  app.unmount()
 })
 
 test('An in-flight account save blocks duplicate submits and edits; failed saves preserve the draft for retry', async () => {
@@ -213,3 +249,24 @@ test('Order details reconcile gross prices, product discounts and allocated coup
   assert.deepEqual(nodes(app.tree).filter(node => node.type === 'del').map(text), ['600 تومان', '400 تومان'])
   app.unmount()
 })
+
+for (const status of ['SHIPPED', 'DELIVERED', 'PROCESSING']) {
+  test(`Owner order details preserve a long tracking code and display it only after dispatch: ${status}`, async () => {
+    const trackingCode = '000123456789012345678901'
+    const app = page({ 'GET /api/orders': [response([{
+      id: 'tracked-order', createdAt: '2026-10-19T12:00:00Z', status, verified: true,
+      total: 100000, shippingCost: 0, shippingMethodName: 'پست', recipientName: 'گیرنده', address: 'تبریز', phone: profile.phone,
+      postalCode: '0123456789', trackingCode, trackingRecordedAt: '2026-10-19T13:00:00Z', items: [],
+    }])] })
+    await settle(); app.render()
+    nodes(app.tree).find(node => node.type === 'button' && text(node).startsWith('سفارش‌های من')).props.onClick(); app.render()
+    nodes(app.tree).find(node => node.type === 'button' && node.props['aria-expanded'] !== undefined).props.onClick(); app.render()
+    if (status === 'PROCESSING') assert.ok(!text(app.tree).includes(trackingCode))
+    else {
+      assert.match(text(app.tree), /کد رهگیری مرسوله/)
+      assert.equal(nodes(app.tree).find(node => node.type === 'bdi' && text(node) === trackingCode).props.dir, 'ltr')
+    }
+    assert.ok(text(app.tree).includes('0123456789'))
+    app.unmount()
+  })
+}
