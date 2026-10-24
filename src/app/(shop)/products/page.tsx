@@ -1,7 +1,5 @@
 'use client'
 
-import { SneakerIcon } from '@/components/ui/BrandIcons'
-
 import { useState, useEffect, useMemo, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
@@ -11,6 +9,7 @@ import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import { useSiteSettings } from '@/components/layout/SiteSettingsProvider'
 import { productPricing } from '@/lib/pricing'
 import styles from '@/components/shop/commerce.module.css'
+import catalogStyles from './products.module.css'
 
 interface ApiProduct {
   id: string
@@ -154,14 +153,10 @@ function ProductsContent() {
           <span className="text-night">محصولات</span>
         </nav>
 
-        <section className={styles.intro} data-reveal>
-          <div>
-            <p className={styles.eyebrow}>ویترین {settings.storeName}</p>
-            <h1>جفت بعدی‌ات رو پیدا کن.</h1>
-            <p>برای هر مسیر و هر استایل؛ از اینجا انتخاب کن.</p>
-          </div>
-          <span className={styles.introMark} aria-hidden="true"><SneakerIcon /></span>
-        </section>
+        <header className={catalogStyles.heading}>
+          <h1>محصولات {settings.storeName}</h1>
+          <p>از روزمره تا مهمانی؛ مدلی برای استایل تو.</p>
+        </header>
 
         {/* Toolbar: دسته بندیها (راست) + مرتبسازی/قیمت/موجودی (چپ) */}
         <div className={styles.toolbar}>
