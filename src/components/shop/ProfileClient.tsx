@@ -12,6 +12,7 @@ import {
   X,
   LogOut,
   KeyRound,
+  LayoutDashboard,
   ArrowLeft,
   ChevronLeft,
 } from 'lucide-react'
@@ -385,7 +386,15 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
               <p dir="ltr">{user.email}</p>
             </div>
           </div>
-          <Link href="/products" className={styles.softLink}>یه سر به ویترین بزن <ArrowLeft size={17} /></Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {user.role === 'ADMIN' && (
+              <Link href="/admin" className={styles.softLink}>
+                <LayoutDashboard size={17} aria-hidden="true" />
+                پنل مدیریت
+              </Link>
+            )}
+            <Link href="/products" className={styles.softLink}>یه سر به ویترین بزن <ArrowLeft size={17} /></Link>
+          </div>
         </header>
 
         {/* Tabs */}

@@ -17,7 +17,7 @@ const deferred = () => {
   const promise = new Promise((done) => { resolve = done })
   return { promise, resolve }
 }
-function page(queues = {}) {
+function page(queues = {}, sessionUser = user) {
   const slots = [], effects = [], requests = []
   let cursor = 0, tree, stateWrites = 0
   const same = (left, right) => left && left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
@@ -73,7 +73,7 @@ function page(queues = {}) {
   vm.runInNewContext(code, context)
   function render() {
     cursor = 0
-    tree = context.module.exports.default({ user })
+    tree = context.module.exports.default({ user: sessionUser })
     effects.splice(0).forEach((effect) => effect())
     return tree
   }
@@ -100,6 +100,13 @@ const form = (app) => nodes(app.tree).find((node) => node.type === 'form' && nod
 const submit = (app) => form(app).props.onSubmit({ preventDefault() {} })
 const save = (app) => nodes(form(app)).find((node) => node.type === 'button' && node.props.type === 'submit')
 const writes = (app) => app.requests.filter((request) => request.method === 'PATCH')
+
+test('Only administrators get a link to the admin panel in their profile', () => {
+  const adminLink = (app) => nodes(app.tree).find((node) => node.type === 'Link' && node.props.href === '/admin')
+
+  assert.equal(adminLink(page()), undefined)
+  assert.equal(text(adminLink(page({}, { ...user, role: 'ADMIN' }))), 'پنل مدیریت')
+})
 
 test('Delayed profile load cannot save an empty placeholder phone and fills canonical name and phone together', async () => {
   const load = deferred()
