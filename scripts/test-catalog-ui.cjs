@@ -10,6 +10,8 @@ const localizedInputModule = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/localized-input.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: localizedInputModule })
 const contactModule = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/customer-contact.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: contactModule })
+const bulkOrderContract = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/admin-order-bulk-contract.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: bulkOrderContract })
 
 // Execute the real page handlers with hook and fetch doubles. No server or DB is contacted.
 const shoe = { id: 'shoe-1', code: 'PANIK-00622', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, inventoryConfigured: true, inventoryVersion: 1, variants: [{ id: 'variant-1', size: 42, color: 'سبز', stock: 5, isActive: true }], sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
@@ -93,6 +95,7 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     '@/lib/pricing': pricingModule.exports,
     '@/lib/localized-input': localizedInputModule.exports,
     '@/lib/customer-contact': contactModule.exports,
+    '@/lib/admin-order-bulk-contract': bulkOrderContract.exports,
     '@/lib/session-actions': { signOutWithSessionLock: async () => {} },
     '@/components/shop/commerce.module.css': css,
     '@/components/admin/admin.module.css': css,
@@ -603,7 +606,7 @@ test('A confirmed status and issued invoice survive a failed summary refresh', a
   assert.equal(orderDelete(app, row.id).props.disabled, true)
   assert.match(orderDelete(app, row.id).props.title, /دارای فاکتور/)
   assert.match(text(app.tree), /تازه‌سازی انجام نشد/)
-  const toggle = find(app, (node) => node.type === 'button' && node.props['aria-expanded'] === false)
+  const toggle = find(app, (node) => node.type === 'button' && node.props.className?.includes('detailsButton') && node.props['aria-expanded'] === false)
   toggle.props.onClick(); app.render()
   assert.equal(find(app, (node) => node.type === 'InvoiceDownload').props.invoice.id, invoice.id)
   assert.equal(app.requests.filter((request) => request.method === 'PATCH').length, 1)

@@ -447,7 +447,7 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
       return result
     } finally { unlock?.() }
   } }
-  const route = load('src/app/api/orders/[id]/route.ts', {
+  const dependencies = {
     'next/server': { NextResponse: Response }, '@/lib/request-origin': { isSameOriginRequest: () => true }, '@/lib/prisma': { prisma }, '@/lib/auth': { auth: async () => session },
     '@/lib/invoice': invoice,
     '@/lib/coupons': coupons,
@@ -455,7 +455,9 @@ function statusHarness({ initial = order, stocks = { shoe: 7 }, overlap = false,
     '@/lib/customer-contact': require('./helpers/customer-contact.cjs'),
     '@/lib/checkout-profile': require('./helpers/checkout-profile-double.cjs'),
     '@/lib/site-settings': { readSiteSettings: async () => ({ storeName }) },
-  })
+  }
+  dependencies['@/lib/order-status-transition'] = load('src/lib/order-status-transition.ts', dependencies)
+  const route = load('src/app/api/orders/[id]/route.ts', dependencies)
   const params = { params: Promise.resolve({ id: 'order' }) }
   return { committed, mutations, transactions: () => transactions,
     setStoreName: (value) => { storeName = value },

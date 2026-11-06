@@ -125,6 +125,7 @@ function harness(options = {}) {
   }
   const orders = load('src/app/api/orders/route.ts', dependencies)
   const review = load('src/app/api/admin/payments/[id]/review/route.ts', dependencies)
+  dependencies['@/lib/order-status-transition'] = load('src/lib/order-status-transition.ts', dependencies)
   const status = load('src/app/api/orders/[id]/route.ts', dependencies)
   const asUser = (id, role = 'USER') => { session = { user: { id, role, name: id } } }
   return {

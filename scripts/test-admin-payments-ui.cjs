@@ -76,12 +76,15 @@ function componentApp(file, queues = {}, href = 'https://shop.example.test/admin
   const jsx = (type, props) => ({ type, props })
   const contract = { exports: {} }
   vm.runInNewContext(source('src/lib/payment-contract.ts'), { module: contract })
+  const bulkContract = { exports: {} }
+  vm.runInNewContext(source('src/lib/admin-order-bulk-contract.ts'), { module: bulkContract })
   const dependencies = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'lucide-react': new Proxy({}, { get: (_, name) => name }),
     'next/link': { __esModule: true, default: 'Link' },
     '@/lib/utils': { formatPrice: String },
     '@/lib/payment-contract': contract.exports,
+    '@/lib/admin-order-bulk-contract': bulkContract.exports,
     '@/components/shop/InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
     '@/components/ui/PersianDatePicker': { __esModule: true, default: 'PersianDatePicker' },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
@@ -283,4 +286,104 @@ test('Leaving orders aborts a pending status write and ignores its late response
   assert.equal(writes(runtime)[0].signal.aborted, true)
   pending.resolve(response({ ...order, status: 'CANCELLED' })); await saving
   assert.equal(page.stateWrites, before)
+})
+
+const buttonText = (app, label) => nodes(app.tree).find(node => node.type === 'button' && text(node) === label)
+const labelled = (app, label) => nodes(app.tree).find(node => node.props['aria-label'] === label)
+const radio = (app, value) => nodes(app.tree).find(node => node.type === 'input' && node.props.name === 'bulk-order-scope' && node.props.value === value)
+const change = (app, id, value) => { input(app, id).props.onChange({ target: { value } }); app.render() }
+const bulkPosts = runtime => writes(runtime).filter(request => request.url === '/api/admin/orders/bulk').map(request => JSON.parse(request.body))
+
+test('Bulk selection spans pages, previews the selected IDs, and confirms only eligible rows once', async () => {
+  const saving = deferred()
+  const first = { ...order, id: 'order-first' }, second = { ...order, id: 'order-second' }
+  const report = (items, page) => orderReport(items, { pagination: { page, pageSize: 20, total: 2, pages: 2 } })
+  const runtime = componentApp('src/app/admin/orders/page.tsx', {
+    'GET /api/admin/orders': [response(report([first], 1)), response(report([second], 2)), response(report([second], 2))],
+    'POST /api/admin/orders/bulk': [response({ token: 'preview-token', limit: 100, rows: [
+      { id: first.id, status: 'PENDING', eligible: true },
+      { id: second.id, status: 'PENDING', eligible: false, reason: 'رسید در حال بررسی است.' },
+    ] }), saving.promise],
+  })
+  const app = runtime.mount(); await settle(); app.render()
+  assert.equal(labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه'), undefined)
+  buttonText(app, 'تغییر گروهی وضعیت').props.onClick(); app.render()
+  assert.equal(radio(app, 'filtered').props.disabled, true)
+  labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه').props.onChange(); app.render()
+  assert.equal(labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه').props.checked, true)
+  labelled(app, 'صفحهٔ بعد').props.onClick(); app.render(); await settle(); app.render()
+  assert.equal(labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه').props.checked, false)
+  labelled(app, `انتخاب سفارش ${second.id.slice(-6)}`).props.onChange(); app.render()
+  change(app, 'bulk-order-status', 'CANCELLED')
+  await buttonText(app, 'پیش‌نمایش تغییر').props.onClick(); app.render()
+  assert.deepEqual(bulkPosts(runtime), [{ action: 'preview', mode: 'selected', status: 'CANCELLED', ids: [first.id, second.id] }])
+  assert.match(text(app.tree), /رسید در حال بررسی است/)
+  assert.match(text(app.tree), /به‌صورت خودکار برنمی‌گرداند/)
+  const confirmBulk = buttonText(app, 'تأیید و تغییر 1 سفارش').props.onClick
+  const pending = confirmBulk()
+  await confirmBulk(); app.render()
+  assert.equal(input(app, 'orders-search').props.disabled, true)
+  assert.deepEqual(bulkPosts(runtime)[1], { action: 'confirm', token: 'preview-token', ids: [first.id] })
+  assert.equal(bulkPosts(runtime).length, 2)
+  saving.resolve(response({ results: [{ id: first.id, outcome: 'updated' }] })); await pending; app.render()
+  assert.match(text(app.tree), /1 تغییر کرد · 1 بدون تغییر/)
+  assert.equal(runtime.requests.filter(request => !request.method).length, 3)
+  assert.equal(labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه').props.checked, false)
+  app.unmount()
+})
+
+test('Bulk filtered scope sends applied date filters across all pages, and a new filter invalidates confirmation', async () => {
+  const runtime = componentApp('src/app/admin/orders/page.tsx', {
+    'GET /api/admin/orders': [response(orderReport([order])), response(orderReport([order], {
+      pagination: { page: 1, pageSize: 20, total: 31, pages: 2 },
+    })), response(orderReport([]))],
+    'POST /api/admin/orders/bulk': [response({ token: 'date-token', limit: 100, rows: [{ id: order.id, status: 'PROCESSING', eligible: true }] })],
+  })
+  const app = runtime.mount(); await settle(); app.render()
+  buttonText(app, 'تغییر گروهی وضعیت').props.onClick(); app.render()
+  input(app, 'orders-date-from').props.onChange('2026-11-02'); app.render()
+  input(app, 'orders-date-to').props.onChange('2026-11-06'); app.render()
+  assert.equal(radio(app, 'filtered').props.disabled, true, 'Date drafts must not count as an applied filter')
+  await submit(app); app.render(); await settle(); app.render()
+  assert.equal(radio(app, 'filtered').props.disabled, false)
+  radio(app, 'filtered').props.onChange(); app.render()
+  assert.match(text(app.tree), /31 سفارش مطابق فیلترهای اعمال‌شده، در تمام صفحه‌ها/)
+  assert.equal(labelled(app, 'انتخاب همهٔ سفارش‌های این صفحه'), undefined)
+  change(app, 'bulk-order-status', 'SHIPPED')
+  await buttonText(app, 'پیش‌نمایش تغییر').props.onClick(); app.render()
+  const [preview] = bulkPosts(runtime)
+  assert.equal(preview.mode, 'filtered')
+  assert.equal(preview.status, 'SHIPPED')
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(preview.filters)), { q: '', status: 'all', payment: 'all', range: 'custom', from: '2026-11-02', to: '2026-11-06' })
+  assert.ok(buttonText(app, 'تأیید و تغییر 1 سفارش'))
+  change(app, 'orders-range-filter', 'today')
+  assert.equal(buttonText(app, 'تأیید و تغییر 1 سفارش'), undefined)
+  assert.equal(bulkPosts(runtime).length, 1)
+  await settle(); app.unmount()
+})
+
+test('An interrupted bulk batch shows known, unknown and unsent results without retrying', async () => {
+  const candidates = Array.from({ length: 43 }, (_, index) => ({ id: `order-${index + 1}`, status: 'PROCESSING', eligible: true }))
+  const report = orderReport([order], { pagination: { page: 1, pageSize: 20, total: 43, pages: 3 } })
+  const runtime = componentApp('src/app/admin/orders/page.tsx', {
+    'GET /api/admin/orders': [response(report), response(report), response(report)],
+    'POST /api/admin/orders/bulk': [
+      response({ token: 'snapshot', limit: 100, rows: candidates }),
+      response({ results: candidates.slice(0, 20).map((row, index) => ({ id: row.id, outcome: index === 19 ? 'skipped' : 'updated' })) }),
+      new TypeError('Connection reset'),
+    ],
+  })
+  const app = runtime.mount(); await settle(); app.render()
+  change(app, 'orders-range-filter', 'today'); await settle(); app.render()
+  buttonText(app, 'تغییر گروهی وضعیت').props.onClick(); app.render()
+  radio(app, 'filtered').props.onChange(); app.render()
+  change(app, 'bulk-order-status', 'SHIPPED')
+  await buttonText(app, 'پیش‌نمایش تغییر').props.onClick(); app.render()
+  await buttonText(app, 'تأیید و تغییر 43 سفارش').props.onClick(); app.render()
+  assert.deepEqual(bulkPosts(runtime).slice(1).map(request => request.ids), [candidates.slice(0, 20).map(row => row.id), candidates.slice(20, 40).map(row => row.id)])
+  assert.match(text(app.tree), /19 تغییر کرد · 1 بدون تغییر · 20 نتیجه نامشخص · 3 ارسال نشد/)
+  assert.match(text(app.tree), /هیچ درخواستی خودکار تکرار نشد/)
+  assert.equal(buttonText(app, 'تأیید و تغییر 43 سفارش'), undefined)
+  assert.equal(runtime.requests.filter(request => !request.method).length, 3)
+  app.unmount()
 })
