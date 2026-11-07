@@ -12,7 +12,10 @@ datasource db {
 
 model User {
   id        String    @id @default(cuid())
-  email     String    @unique
+  email     String?   @unique
+  loginPhone String?  @unique
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
   name      String
   password  String
   role      Role      @default(USER)
@@ -27,6 +30,44 @@ model User {
   stockMovements StockMovement[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+}
+
+model RegistrationSettings {
+  id                     Int      @id @default(1)
+  emailEnabled           Boolean  @default(false)
+  smsEnabled             Boolean  @default(false)
+  expiryMinutes          Int      @default(5)
+  maxAttempts            Int      @default(5)
+  resendSeconds          Int      @default(60)
+  destinationHourlyLimit Int      @default(5)
+  ipHourlyLimit          Int      @default(30)
+  emailSender            String   @default("auth")
+  smsTemplate            String   @default("")
+  version                Int      @default(0)
+  updatedAt              DateTime @updatedAt
+}
+
+model RegistrationChallenge {
+  id          String    @id @default(cuid())
+  channel     String
+  destination String
+  codeDigest  String
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  resendAt    DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([channel, destination])
+  @@index([expiresAt])
+}
+
+model RegistrationRateLimit {
+  key             String   @id
+  windowStartedAt DateTime
+  count           Int
+
+  @@index([windowStartedAt])
 }
 
 model Address {

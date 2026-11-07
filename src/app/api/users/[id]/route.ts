@@ -8,6 +8,7 @@ import { serializableTransaction } from '@/lib/serializable-transaction'
 
 const userSelect = {
   id: true, name: true, email: true, phone: true, postalCode: true, role: true,
+  loginPhone: true, emailVerifiedAt: true, phoneVerifiedAt: true,
   isActive: true, createdAt: true, updatedAt: true,
   _count: { select: { orders: true, addresses: true } },
 } as const
@@ -96,7 +97,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (session.user.id === id && role !== undefined && role !== 'ADMIN') throw new ApiInputError('نمیتوانید نقش خودتان را تغییر دهید')
     if (session.user.id === id && isActive === false) throw new ApiInputError('نمی‌توانید حساب خودتان را مسدود کنید')
     const name = body.name === undefined ? undefined : textField(body.name, 'نام', 200)
-    const email = body.email === undefined ? undefined : emailField(body.email)
+    const email = body.email === undefined ? undefined : body.email === null || body.email === '' ? null : emailField(body.email)
     const phone = body.phone === undefined ? undefined : customerPhoneField(body.phone, true)
     const postalCode = body.postalCode === undefined ? undefined : customerPostalCodeField(body.postalCode, true)
     const expectedAddresses = body.addresses === undefined ? undefined : addressSnapshot(body.expectedAddresses)
@@ -110,15 +111,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       // blocked/demoted this session while the request was hashing a password.
       const actor = await tx.user.findUnique({ where: { id: session.user.id }, select: { role: true, isActive: true } })
       if (actor?.role !== 'ADMIN' || actor.isActive === false) throw new ApiInputError('دسترسی غیرمجاز', 401)
-      const target = await tx.user.findUnique({ where: { id }, select: { role: true, isActive: true } })
+      const target = await tx.user.findUnique({ where: { id }, select: { role: true, isActive: true, email: true, loginPhone: true } })
       if (!target) throw new ApiInputError('کاربر یافت نشد', 404)
+      if (email === null && !target.loginPhone) throw new ApiInputError('حساب بدون موبایل ورود باید ایمیل داشته باشد')
       const nextRole = role ?? target.role
       const nextActive = isActive ?? target.isActive
       if (target.role === 'ADMIN' && target.isActive !== false && (nextRole !== 'ADMIN' || nextActive === false) &&
           await tx.user.count({ where: { role: 'ADMIN', isActive: true } }) <= 1) {
         throw new ApiInputError('حداقل یک مدیر فعال باید در فروشگاه باقی بماند', 409)
       }
-      if (email !== undefined && await tx.user.findFirst({ where: { id: { not: id }, email: { equals: email, mode: 'insensitive' } }, select: { id: true } })) {
+      if (email && await tx.user.findFirst({ where: { id: { not: id }, email: { equals: email, mode: 'insensitive' } }, select: { id: true } })) {
         throw new ApiInputError('این ایمیل قبلاً ثبت شده است', 409)
       }
       if (addresses !== undefined) {
@@ -139,6 +141,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return tx.user.update({
         where: { id }, data: {
           ...(name !== undefined && { name }), ...(email !== undefined && { email }),
+          ...(email !== undefined && email !== (target.email?.toLowerCase() ?? null) && { emailVerifiedAt: null }),
           ...(phone !== undefined && { phone }), ...(postalCode !== undefined && { postalCode }),
           ...(role !== undefined && { role }), ...(isActive !== undefined && { isActive }),
           ...(hashed !== undefined && { password: hashed }), ...(revokeSessions && { authVersion: { increment: 1 } }),

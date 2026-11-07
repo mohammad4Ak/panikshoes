@@ -14,6 +14,7 @@ export default async function ProfilePage() {
       user={{
         name: session.user?.name ?? '',
         email: session.user?.email ?? '',
+        loginPhone: session.user?.loginPhone ?? '',
         role: session.user?.role ?? 'USER',
       }}
     />

@@ -5,12 +5,22 @@ export function normalizeContactDigits(value: string): string {
     ? character.charCodeAt(0) - 0x6f0 : character.charCodeAt(0) - 0x660))
 }
 
+export function caseInsensitiveEmailFilter(email: string) {
+  // Prisma uses PostgreSQL ILIKE here, even for equals.
+  return { equals: email.replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' as const }
+}
+
 export function normalizePhone(value: unknown): string {
   if (typeof value !== 'string') return ''
   const phone = normalizeContactDigits(value).trim().replace(/[\s\-()\u200c\u200e\u200f]/g, '')
   if (phone.startsWith('+98')) return `0${phone.slice(3)}`
   if (phone.startsWith('0098')) return `0${phone.slice(4)}`
   return phone
+}
+
+export function normalizeLoginPhone(value: unknown): string {
+  const phone = normalizePhone(value)
+  return /^09\d{9}$/.test(phone) ? phone : ''
 }
 
 export function normalizePostalCode(value: unknown): string {

@@ -13,7 +13,8 @@ import styles from './users.module.css'
 
 type Role = 'USER' | 'ADMIN'
 interface User {
-  id: string; name: string; email: string; phone: string | null; postalCode: string | null
+  id: string; name: string; email: string | null; loginPhone: string | null; phone: string | null; postalCode: string | null
+  emailVerifiedAt?: string | null; phoneVerifiedAt?: string | null
   role: Role; isActive: boolean; createdAt?: string; _count: { orders: number }
 }
 interface Address { id?: string; title: string | null; address: string; phone: string; postalCode: string | null; isDefault: boolean }
@@ -33,7 +34,7 @@ const paymentLabels: Record<string, string> = { UNPAID: 'پرداخت‌نشده
 const normalizeSearch = (value: string) => normalizePhone(value).toLowerCase().replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[\s\u200c\u200e\u200f\-()+]/g, '')
 const date = (value?: string) => !value || Number.isNaN(new Date(value).getTime()) ? '—' : new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium', timeZone: 'Asia/Tehran' }).format(new Date(value))
 const errorMessage = (cause: unknown) => cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'ارتباط با سرور برقرار نشد. دوباره تلاش کنید.'
-const draftOf = (user: Detail['user']): Draft => ({ name: user.name, email: user.email, phone: user.phone ?? '', postalCode: user.postalCode ?? '', role: user.role, isActive: user.isActive !== false, addresses: user.addresses.map(address => ({ ...address })) })
+const draftOf = (user: Detail['user']): Draft => ({ name: user.name, email: user.email ?? '', phone: user.phone ?? '', postalCode: user.postalCode ?? '', role: user.role, isActive: user.isActive !== false, addresses: user.addresses.map(address => ({ ...address })) })
 
 export default function AdminUsersPage() {
   const settings = useSiteSettings()
@@ -153,15 +154,19 @@ export default function AdminUsersPage() {
   const handleSave = async (event: FormEvent) => {
     event.preventDefault()
     if (!selectedId || !detail || !draft || detailLoading || addressConflict || (requiresConfirmation && !confirmed)) return
-    if (!draft.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim()) || (newPassword !== '' && newPassword.length < 6)) {
-      setTab('account'); setModalError('نام و ایمیل معتبر لازم است و رمز جدید باید حداقل ۶ نویسه داشته باشد.'); return
+    const email = draft.email.trim()
+    if (!draft.name.trim() || (email ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) : !detail.user.loginPhone) || (newPassword !== '' && newPassword.length < 6)) {
+      setTab('account'); setModalError(detail.user.loginPhone
+        ? 'نام لازم است. اگر ایمیل وارد شده باید معتبر باشد و رمز جدید باید حداقل ۶ نویسه داشته باشد.'
+        : 'نام و ایمیل معتبر لازم است و رمز جدید باید حداقل ۶ نویسه داشته باشد.'); return
     }
     const controller = startWrite()
     if (!controller) return
     setModalError(''); setSuccess('')
     const baseline = draftOf(detail.user)
     const payload: Record<string, unknown> = {}
-    for (const key of ['name', 'email', 'phone', 'postalCode', 'role', 'isActive'] as const) if (draft[key] !== baseline[key]) payload[key] = draft[key]
+    for (const key of ['name', 'phone', 'postalCode', 'role', 'isActive'] as const) if (draft[key] !== baseline[key]) payload[key] = draft[key]
+    if (email !== baseline.email) payload.email = email || null
     if (JSON.stringify(draft.addresses) !== JSON.stringify(baseline.addresses)) {
       payload.addresses = draft.addresses.map(({ id, title, address, phone, postalCode, isDefault }) => ({ ...(id ? { id } : {}), title, address, phone, postalCode, isDefault }))
       payload.expectedAddresses = baseline.addresses.map(({ id, title, address, phone, postalCode, isDefault }) => ({ id, title, address, phone, postalCode, isDefault }))
@@ -242,7 +247,7 @@ export default function AdminUsersPage() {
   }
 
   const query = normalizeSearch(search)
-  const filtered = users.filter(user => (roleFilter === 'all' || user.role === roleFilter) && (statusFilter === 'all' || (statusFilter === 'active' ? user.isActive !== false : user.isActive === false)) && (!query || [user.name, user.email, user.phone ?? '', user.postalCode ?? '', user.id].some(value => normalizeSearch(value).includes(query))))
+  const filtered = users.filter(user => (roleFilter === 'all' || user.role === roleFilter) && (statusFilter === 'all' || (statusFilter === 'active' ? user.isActive !== false : user.isActive === false)) && (!query || [user.name, user.email ?? '', user.loginPhone ?? '', user.phone ?? '', user.postalCode ?? '', user.id].some(value => normalizeSearch(value).includes(query))))
   const pages = Math.max(1, Math.ceil(filtered.length / 20)), currentPage = Math.min(page, pages)
   const displayed = filtered.slice((currentPage - 1) * 20, currentPage * 20)
   const blocked = users.filter(user => user.isActive === false).length
@@ -271,7 +276,7 @@ export default function AdminUsersPage() {
         {!displayed.length ? <p className={styles.empty}>{users.length ? 'کاربری با این جستجو و فیلتر پیدا نشد.' : 'هنوز کاربری ثبت نشده است.'}</p> : <div className={styles.tableScroll}><table className={styles.table}>
           <thead><tr><th>نام و ایمیل</th><th>اطلاعات تماس</th><th>سفارش‌ها</th><th>نقش و وضعیت</th><th>عملیات</th></tr></thead>
           <tbody>{displayed.map(user => <tr key={user.id}>
-            <td data-label="کاربر"><strong className={styles.userName}>{user.name}{user.role === 'ADMIN' && <Shield size={14} aria-label="مدیر" />}</strong><span className={styles.email} dir="ltr">{user.email}</span><span className={styles.muted}>عضویت: {date(user.createdAt)}</span></td>
+            <td data-label="کاربر"><strong className={styles.userName}>{user.name}{user.role === 'ADMIN' && <Shield size={14} aria-label="مدیر" />}</strong><span className={styles.email} dir="ltr">{user.email || user.loginPhone}</span><span className={styles.muted}>عضویت: {date(user.createdAt)}</span></td>
             <td data-label="اطلاعات تماس"><span className={styles.contactValue}>تلفن: <b dir="ltr">{user.phone || 'ثبت نشده'}</b></span><span className={styles.contactValue}>کدپستی: <b dir="ltr">{user.postalCode || 'ثبت نشده'}</b></span><span className={`${styles.badge} ${customerContactComplete(user.phone, user.postalCode) ? styles.good : styles.warning}`}>{customerContactComplete(user.phone, user.postalCode) ? 'اطلاعات خرید کامل' : 'نیاز به تکمیل اطلاعات'}</span></td>
             <td data-label="سفارش‌ها">{formatPrice(user._count?.orders ?? 0)} سفارش</td>
             <td data-label="وضعیت"><span className={styles.role}>{user.role === 'ADMIN' ? 'مدیر' : 'کاربر'}</span><span className={`${styles.badge} ${user.isActive === false ? styles.danger : styles.good}`}>{user.isActive === false ? 'مسدود' : 'فعال'}</span></td>
@@ -293,7 +298,8 @@ export default function AdminUsersPage() {
                 <p className={styles.info}>شمارهٔ تماس و کدپستی حساب برای ثبت خرید لازم‌اند. اصلاح این اطلاعات، اطلاعات سفارش‌های قبلی را تغییر نمی‌دهد.</p>
                 <div className={styles.formGrid}>
                   <label className={styles.field}><span>نام و نام خانوادگی</span><input required={tab === 'account'} maxLength={200} className="input-field" value={draft.name} onChange={event => updateDraft({ name: event.target.value })} /></label>
-                  <label className={styles.field}><span>ایمیل</span><input required={tab === 'account'} type={tab === 'account' ? 'email' : 'text'} maxLength={254} dir="ltr" className="input-field" value={draft.email} onChange={event => updateDraft({ email: event.target.value })} /></label>
+                  <label className={styles.field}><span>ایمیل{detail.user.loginPhone ? ' (اختیاری)' : ''}</span><input required={tab === 'account' && !detail.user.loginPhone} type={tab === 'account' ? 'email' : 'text'} maxLength={254} dir="ltr" className="input-field" value={draft.email} onChange={event => updateDraft({ email: event.target.value })} />{detail.user.email && <small className={styles.muted}>{detail.user.emailVerifiedAt ? `تأیید ایمیل در ${date(detail.user.emailVerifiedAt)}` : 'تأیید با کد یک‌بارمصرف ثبت نشده است.'}</small>}</label>
+                  {detail.user.loginPhone && <label className={styles.field}><span>موبایل ورود</span><input readOnly dir="ltr" className="input-field" value={detail.user.loginPhone} /><small className={styles.muted}>{detail.user.phoneVerifiedAt ? `تأیید موبایل در ${date(detail.user.phoneVerifiedAt)}` : 'تأیید با کد یک‌بارمصرف ثبت نشده است.'}</small></label>}
                   <label className={styles.field}><span>شمارهٔ تماس</span><input type="tel" inputMode="tel" maxLength={24} dir="ltr" placeholder="09123456789" className="input-field" value={draft.phone} onChange={event => updateDraft({ phone: event.target.value })} /></label>
                   <label className={styles.field}><span>کدپستی</span><input inputMode="numeric" maxLength={20} dir="ltr" placeholder="کدپستی ۱۰ رقمی" className="input-field" value={draft.postalCode} onChange={event => updateDraft({ postalCode: event.target.value })} /></label>
                   <label className={styles.field}><span>نقش</span><EnhancedSelect nativeAppearance className="input-field" value={draft.role} disabled={detail.isSelf} onChange={event => updateDraft({ role: event.target.value as Role })}><option value="USER">کاربر</option><option value="ADMIN">مدیر</option></EnhancedSelect></label>

@@ -177,7 +177,7 @@ export async function renderInvoicePdf(
   y += 3
   sectionHeading('مشخصات خریدار')
   field('نام', snapshot.buyer.name, 'مشخصات خریدار')
-  field('ایمیل', snapshot.buyer.email, 'مشخصات خریدار')
+  if (snapshot.buyer.email) field('ایمیل', snapshot.buyer.email, 'مشخصات خریدار')
   y += 3
   sectionHeading('مشخصات گیرنده')
   field('نام', snapshot.recipient.name, 'مشخصات گیرنده')

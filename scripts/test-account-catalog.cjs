@@ -26,6 +26,8 @@ function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now
   const database = prisma.$transaction ? prisma : { ...prisma, $transaction: callback => callback(prisma) }
   const dependencies = {
     'next/server': { NextResponse: Response },
+    'node:crypto': require('node:crypto'),
+    'node:net': require('node:net'),
     '@/lib/prisma': { prisma: database }, './prisma': { prisma: database },
     '@/lib/auth': { auth: async () => session },
     '@/lib/payments': { expireUnpaidOrders: async () => 0 },
@@ -48,7 +50,7 @@ function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now
       if (name.startsWith('./')) return readModule(path.relative(root, path.join(path.dirname(absolute), `${name}.ts`)))
       throw new Error(`Unexpected dependency ${name}`)
     }
-    vm.runInNewContext(code, { module: testModule, require: requireDependency, Response, Buffer, URL,
+    vm.runInNewContext(code, { module: testModule, require: requireDependency, Response, Headers, Buffer, URL,
       Date: class extends Date { static now() { return now() } },
       process: { env: {}, cwd: () => root } }, { filename: absolute })
     cache.set(absolute, testModule.exports)
@@ -205,6 +207,8 @@ test('Login validates credential types and finds existing mixed-case email accou
   assert.equal((await authorize({ email: ' mixed@example.com ', password: 'abcdef' })).id, 'user')
   assert.equal(query.where.email.equals, 'mixed@example.com')
   assert.equal(query.where.email.mode, 'insensitive')
+  await authorize({ email: 'a_b%@example.com', password: 'abcdef' })
+  assert.equal(query.where.email.equals, 'a\\_b\\%@example.com')
 })
 
 for (const body of [null, [], { name: 3, email: 'a@b.com', password: 'abcdef' },
@@ -222,28 +226,10 @@ test('Malformed registration JSON returns 400', async () => {
   assert.equal(response.status, 400)
 })
 
-test('Registration normalizes email/name and cannot accept an ADMIN role or leak password', async () => {
-  let created
-  const { handlers } = load('src/app/api/auth/register/route.ts', { prisma: { user: {
-    findFirst: async () => null,
-    create: async (query) => { created = query; return { id: 'new', name: query.data.name, email: query.data.email } },
-  } } })
-  const response = await handlers.POST(request({ name: ' Name ', email: ' TEST@Example.com ', password: 'abcdef', role: 'ADMIN' }))
-  assert.equal(response.status, 201)
-  assert.equal(created.data.role, 'USER')
-  assert.equal(created.data.email, 'test@example.com')
-  assert.equal(created.data.name, 'Name')
-  assert.ok(!('password' in (await response.json())))
-})
-
-test('Registration handles case duplicate and concurrent unique conflict as 409', async () => {
-  for (const existing of [true, false]) {
-    const { handlers } = load('src/app/api/auth/register/route.ts', { prisma: { user: {
-      findFirst: async () => existing ? { id: 'existing' } : null,
-      create: async () => { throw { code: 'P2002' } },
-    } } })
-    assert.equal((await handlers.POST(request({ name: 'Name', email: 'a@b.com', password: 'abcdef' }))).status, 409)
-  }
+test('Valid legacy registration credentials cannot bypass OTP or choose an account role', async () => {
+  const { handlers } = load('src/app/api/auth/register/route.ts')
+  const response = await handlers.POST(request({ name: 'Name', email: 'user@example.com', password: 'abcdef', role: 'ADMIN' }))
+  assert.equal(response.status, 400)
 })
 
 for (const session of [null, {}, { user: {} }, customer, { user: { role: 'ADMIN' } }]) {

@@ -182,16 +182,34 @@ test('Support detail excludes passwords, session versions and receipt bytes whil
 
 test('Administrator can repair account identity and contacts without rewriting historical shipping snapshots', async () => {
   const db = database()
+  db.buyer().emailVerifiedAt = '2026-11-06T10:00:00Z'
   const historical = plain(db.state.orders)
   const { handlers } = load('src/app/api/users/[id]/route.ts', { prisma: db.prisma })
   const response = await handlers.PATCH(request({ name: ' نام تازه ', email: ' NEW@EXAMPLE.TEST ', phone: '+982112345678', postalCode: '۱۲۳۴۵۶۷۸۹۰' }), context())
   assert.equal(response.status, 200)
   assert.equal(db.buyer().name, 'نام تازه')
   assert.equal(db.buyer().email, 'new@example.test')
+  assert.equal(db.buyer().emailVerifiedAt, null)
   assert.equal(db.buyer().phone, '02112345678')
   assert.equal(db.buyer().authVersion, 0)
   assert.deepEqual(db.state.orders, historical)
   assert.equal(db.queries.find(([name]) => name === 'transaction')[1].isolationLevel, 'Serializable')
+})
+
+test('Support can edit a mobile account without email but cannot replace its verified mobile with a contact number', async () => {
+  const db = database()
+  const { handlers } = load('src/app/api/users/[id]/route.ts', { prisma: db.prisma })
+  assert.equal((await handlers.PATCH(request({ email: null }), context())).status, 400)
+
+  const phoneVerifiedAt = '2026-11-06T10:00:00Z'
+  Object.assign(db.buyer(), { loginPhone: '09123456789', phoneVerifiedAt })
+  const response = await handlers.PATCH(request({ email: null, phone: '02112345678', loginPhone: '09123456780' }), context())
+  assert.equal(response.status, 200)
+  const updated = await response.json()
+  assert.equal(updated.email, null)
+  assert.equal(updated.phone, '02112345678')
+  assert.equal(updated.loginPhone, '09123456789')
+  assert.equal(updated.phoneVerifiedAt, phoneVerifiedAt)
 })
 
 test('Email duplicates and a demoted or blocked actor stop every support mutation', async () => {
@@ -365,6 +383,24 @@ test('Blocked accounts cannot sign in and a security-version change invalidates 
   assert.equal(await config.callbacks.jwt({ token: {}, user: original }), null, 'An authorize response issued before the reset cannot establish a new session')
   const fresh = await config.providers[0].authorize({ email: 'buyer@example.test', password: 'new' })
   assert.ok(await config.callbacks.jwt({ token: {}, user: fresh }))
+})
+
+test('Mobile credentials use the verified login number and establish a session without an email address', async () => {
+  const db = database()
+  Object.assign(db.buyer(), { email: null, loginPhone: '09123456789', phoneVerifiedAt: '2026-11-06T10:00:00Z', phone: '09123456780' })
+  const { authConfig } = load('src/lib/auth.ts', { prisma: db.prisma, bcrypt: { compare: async password => password === 'correct' } })
+  const config = authConfig()
+  const authorize = config.providers[0].authorize
+  assert.equal(await authorize({ loginPhone: '09123456780', password: 'correct' }), null)
+  assert.equal(await authorize({ loginPhone: '09123456789', password: 'incorrect' }), null)
+  const authorized = await authorize({ loginPhone: '+۹۸ ۹۱۲-۳۴۵-۶۷۸۹', password: 'correct' })
+  assert.equal(authorized.id, 'buyer')
+  const token = await config.callbacks.jwt({ token: {}, user: authorized })
+  const session = await config.callbacks.session({ session: { user: {} }, token })
+  assert.equal(session.user.email, '')
+  assert.equal(session.user.loginPhone, '09123456789')
+  db.buyer().isActive = false
+  assert.equal(await authorize({ loginPhone: '09123456789', password: 'correct' }), null)
 })
 
 test('Changing your password uses an atomic old-hash check and revokes every session', async () => {

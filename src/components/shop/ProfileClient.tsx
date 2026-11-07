@@ -27,6 +27,7 @@ import styles from './account.module.css'
 interface SessionUser {
   name: string
   email: string
+  loginPhone: string
   role: string
 }
 
@@ -383,7 +384,7 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
             <div className="min-w-0">
               <p className={styles.eyebrow}>فضای خودِ تو</p>
               <h1>سلام {user.name || 'دوست عزیز'}!</h1>
-              <p dir="ltr">{user.email}</p>
+              <p dir="ltr">{user.email || user.loginPhone}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -583,11 +584,17 @@ export default function ProfileClient({ user }: { user: SessionUser }) {
                 </div>
               )}
 
-              <div>
+              {user.email && <div>
                 <label htmlFor="account-email" className="block font-bold mb-2">ایمیل</label>
                 <input id="account-email" disabled dir="ltr" className="input-field bg-fog/60" value={user.email} />
                 <p className="text-xs text-mist mt-1">ایمیل قابل تغییر نیست</p>
-              </div>
+              </div>}
+
+              {user.loginPhone && <div>
+                <label htmlFor="account-login-phone" className="block font-bold mb-2">موبایل ورود</label>
+                <input id="account-login-phone" readOnly dir="ltr" className="input-field bg-fog/60" value={user.loginPhone} />
+                <p className="text-xs text-mist mt-1">شمارهٔ تماس سفارش‌ها را می‌توانی جداگانه ویرایش کنی.</p>
+              </div>}
 
               <div>
                 <label htmlFor="account-name" className="block font-bold mb-2">نام</label>

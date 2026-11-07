@@ -30,7 +30,7 @@ interface PaymentOrder {
   createdAt: string
   phone: string
   recipientName: string | null
-  user: { name: string; email: string }
+  user: { name: string; email: string | null }
   receipts: Receipt[]
   items: { id: string; productName?: string | null; quantity: number; size: number; color: string; product: { name: string } }[]
 }

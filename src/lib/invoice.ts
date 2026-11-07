@@ -38,7 +38,7 @@ export interface InvoiceSnapshot {
 interface InvoiceOrder {
   id: string
   createdAt: Date | string
-  user: { name: string; email: string }
+  user: { name: string; email: string | null }
   recipientName: string | null
   address: string
   phone: string
@@ -90,7 +90,7 @@ export function buildInvoiceSnapshot(order: InvoiceOrder, sellerName = 'کفش �
   return {
     schemaVersion: 1,
     seller: { name: sellerName },
-    buyer: { name: order.user.name, email: order.user.email },
+    buyer: { name: order.user.name, email: order.user.email ?? '' },
     recipient: {
       name: order.recipientName ?? order.user.name,
       address: order.address,

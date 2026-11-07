@@ -1,8 +1,11 @@
 import { signIn, signOut } from 'next-auth/react'
 import { withSessionLock } from './session-client'
 
-export function signInWithSessionLock(provider: 'credentials', options: {
+export function signInWithSessionLock(provider: 'credentials', options: ({
   email: string
+} | {
+  loginPhone: string
+}) & {
   password: string
   redirect: false
 }) {

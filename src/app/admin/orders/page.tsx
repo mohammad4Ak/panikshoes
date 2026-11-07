@@ -36,7 +36,7 @@ interface Order {
   trackingRecordedAt?: string | null
   createdAt: string
   invoice?: InvoiceMetadata | null
-  user: { name: string; email: string }
+  user: { name: string; email: string | null }
   items: { id: string; quantity: number; size: number; color: string; price: number; originalPrice?: number | null; couponDiscount?: number; productName?: string | null; product: { name: string } }[]
 }
 

@@ -8,9 +8,10 @@ import { ArrowLeft } from 'lucide-react'
 import AuthShell from '@/components/shop/AuthShell'
 import styles from '@/components/shop/account.module.css'
 import { requestSession } from '@/lib/session-client'
+import { normalizeLoginPhone } from '@/lib/customer-contact'
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,19 +21,25 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (submitting.current) return
+    const email = identifier.includes('@') ? identifier.trim().toLowerCase() : ''
+    const loginPhone = email ? '' : normalizeLoginPhone(identifier)
+    if (!email && !loginPhone) {
+      setError('ایمیل یا شمارهٔ موبایل معتبر وارد کن.')
+      return
+    }
     submitting.current = true
     setLoading(true)
     setError('')
 
     try {
       const result = await signIn('credentials', {
-        email,
+        ...(loginPhone ? { loginPhone } : { email }),
         password,
         redirect: false,
       })
 
       if (result?.error) {
-        setError('ایمیل یا رمز عبور اشتباه است')
+        setError('اطلاعات ورود یا رمز عبور اشتباه است.')
         return
       }
       if (!result?.ok) {
@@ -42,7 +49,8 @@ export default function LoginPage() {
 
       // بررسی نقش کاربر برای هدایت
       const session = await requestSession()
-      if (!session?.user?.id || session.user.email?.toLowerCase() !== email.trim().toLowerCase()) {
+      const sessionMatches = loginPhone ? session?.user?.loginPhone === loginPhone : session?.user?.email?.toLowerCase() === email
+      if (!session?.user?.id || !sessionMatches) {
         setError('ورود کامل نشد. دوباره تلاش کن.')
         return
       }
@@ -71,8 +79,8 @@ export default function LoginPage() {
       {error && <div role="alert" className={styles.alert}>{error}</div>}
       <form onSubmit={handleSubmit} className={styles.authForm}>
         <div>
-          <label htmlFor="login-email">ایمیل</label>
-          <input id="login-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input-field" dir="ltr" placeholder="email@example.com" required />
+          <label htmlFor="login-identifier">ایمیل یا شمارهٔ موبایل</label>
+          <input id="login-identifier" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} value={identifier} onChange={(e) => setIdentifier(e.target.value)} className="input-field" dir="ltr" required />
         </div>
         <div>
           <label htmlFor="login-password">رمز عبور</label>

@@ -11,7 +11,7 @@ export async function GET() {
     return NextResponse.json({ error: 'دسترسی غیرمجاز' }, { status: 401 })
   }
   const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, phone: true, postalCode: true, role: true, isActive: true, createdAt: true, updatedAt: true, _count: { select: { orders: true, addresses: true } } },
+    select: { id: true, name: true, email: true, loginPhone: true, phone: true, postalCode: true, role: true, isActive: true, createdAt: true, updatedAt: true, _count: { select: { orders: true, addresses: true } } },
     orderBy: { createdAt: 'desc' },
   })
   return NextResponse.json(users.map(user => ({ ...user, isSelf: user.id === session.user.id })), { headers: { 'Cache-Control': 'private, no-store' } })

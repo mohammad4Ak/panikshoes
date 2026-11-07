@@ -21,6 +21,7 @@ import {
   TicketPercent,
   Warehouse,
   PackageCheck,
+  ShieldCheck,
 } from 'lucide-react'
 import { signOutWithSessionLock as signOut } from '@/lib/session-actions'
 import styles from './admin.module.css'
@@ -42,6 +43,7 @@ const adminNav = [
   { href: '/admin/payment-methods', label: 'روش‌های پرداخت', Icon: CreditCard },
   { href: '/admin/shipping', label: 'روش‌های ارسال', Icon: Truck },
   { href: '/admin/users', label: 'کاربران', Icon: Users },
+  { href: '/admin/registration', label: 'ثبت‌نام و تأیید حساب', Icon: ShieldCheck },
   { href: '/admin/settings', label: 'تنظیمات عمومی', Icon: Settings2 },
 ]
 
