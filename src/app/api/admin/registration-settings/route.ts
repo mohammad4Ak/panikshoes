@@ -30,7 +30,8 @@ export async function PATCH(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ error: 'درخواست از مبدأ نامعتبر است.' }, { status: 403, headers })
 
   try {
-    const settings = parseRegistrationSettings(await readJsonObject(request))
+    const body = await readJsonObject(request)
+    const settings = parseRegistrationSettings(body, await readRegistrationSettings())
     return NextResponse.json(registrationAdminSnapshot(await saveRegistrationSettings(settings)), { headers })
   } catch (error) {
     if (error instanceof ApiInputError) return NextResponse.json({ error: error.message }, { status: error.status, headers })

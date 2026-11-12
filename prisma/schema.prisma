@@ -43,6 +43,15 @@ model RegistrationSettings {
   ipHourlyLimit          Int      @default(30)
   emailSender            String   @default("auth")
   smsTemplate            String   @default("")
+  smsProvider            String   @default("kavenegar")
+  smsApiUrl              String   @default("")
+  smsMethod              String   @default("POST")
+  smsBodyFormat          String   @default("json")
+  smsBodyTemplate        String   @default("{\"mobile\":\"{{phone}}\",\"code\":\"{{code}}\"}")
+  smsHeadersEncrypted    String?
+  smsApiKeyEncrypted     String?
+  smsSuccessPath         String   @default("")
+  smsSuccessValue        String   @default("200")
   version                Int      @default(0)
   updatedAt              DateTime @updatedAt
 }

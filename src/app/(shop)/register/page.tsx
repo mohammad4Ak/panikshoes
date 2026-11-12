@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signInWithSessionLock as signIn } from '@/lib/session-actions'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Clock3, Mail, PencilLine, RotateCw, Smartphone } from 'lucide-react'
 import AuthShell from '@/components/shop/AuthShell'
 import styles from '@/components/shop/account.module.css'
 import { requestSession } from '@/lib/session-client'
@@ -287,15 +287,23 @@ export default function RegisterPage() {
           </button>
         </form>
       ) : <form onSubmit={handleSubmit} className={styles.authForm}>
-        <div>
-          <p className="text-sm break-words">کد تأیید به <bdi className="font-semibold">{challenge.destination}</bdi> ارسال شد.</p>
-          <small>{expirySeconds > 0 ? <>اعتبار کد تا <bdi>{countdown(expirySeconds)}</bdi></> : 'مهلت این کد تمام شد. کد جدید بگیر.'}</small>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void requestCode()} disabled={loading || resendSeconds > 0} className={`${styles.softLink} disabled:opacity-50`}>
-              {resendSeconds > 0 ? <>ارسال دوباره تا <bdi>{countdown(resendSeconds)}</bdi></> : 'ارسال دوبارهٔ کد'}
+        <div className={styles.verificationInfo}>
+          <div className={styles.verificationHeading}>
+            <p>{channel === 'email' ? <Mail size={16} aria-hidden="true" /> : <Smartphone size={16} aria-hidden="true" />}کد تأیید ارسال شد</p>
+            <button type="button" disabled={loading} className={styles.verificationEdit} aria-label={`ویرایش ${channelLabels[channel]}`} onClick={() => { setChallenge(null); changeCode(''); setError('') }}>
+              <PencilLine size={14} aria-hidden="true" />ویرایش
             </button>
-            <button type="button" disabled={loading} className={styles.softLink} onClick={() => { setChallenge(null); changeCode(''); setError('') }}>
-              ویرایش {channelLabels[channel]}
+          </div>
+          <bdi className={styles.verificationDestination}>{challenge.destination}</bdi>
+          <div className={styles.verificationFooter}>
+            <p className={styles.verificationExpiry} data-expired={expirySeconds === 0 || undefined}>
+              <Clock3 size={14} aria-hidden="true" />
+              <span>{expirySeconds > 0 ? 'اعتبار کد' : 'اعتبار کد تمام شد'}</span>
+              {expirySeconds > 0 && <bdi>{countdown(expirySeconds)}</bdi>}
+            </p>
+            <button type="button" onClick={() => void requestCode()} disabled={loading || resendSeconds > 0} className={styles.verificationResend}>
+              <RotateCw size={14} aria-hidden="true" />
+              {resendSeconds > 0 ? <>ارسال دوباره <bdi>{countdown(resendSeconds)}</bdi></> : 'ارسال دوبارهٔ کد'}
             </button>
           </div>
         </div>

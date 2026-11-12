@@ -1,7 +1,10 @@
 import {
   getRegistrationDeliveryReadiness,
+  readRegistrationSmsHeaders,
+  resolveRegistrationSmsApiKey,
   type RegistrationSettings,
 } from './registration-settings'
+import { sendCustomRegistrationSms } from './registration-sms'
 
 interface RegistrationCodeMessage {
   channel: 'email' | 'sms'
@@ -13,7 +16,6 @@ interface RegistrationCodeMessage {
 export async function sendRegistrationCode(settings: RegistrationSettings, message: RegistrationCodeMessage): Promise<void> {
   const { emailConfigured, smsConfigured } = getRegistrationDeliveryReadiness(settings)
   const emailKey = process.env.REGISTRATION_EMAIL_API_KEY?.trim()
-  const smsKey = process.env.REGISTRATION_KAVENEGAR_API_KEY?.trim()
 
   try {
     if (message.channel === 'email' && emailConfigured && emailKey) {
@@ -32,6 +34,15 @@ export async function sendRegistrationCode(settings: RegistrationSettings, messa
       if (response.ok) return
     }
 
+    if (message.channel === 'sms' && smsConfigured && settings.smsProvider === 'custom') {
+      await sendCustomRegistrationSms({ ...settings, smsHeaders: readRegistrationSmsHeaders(settings) }, {
+        phone: message.destination, code: message.code, template: settings.smsTemplate,
+        apiKey: resolveRegistrationSmsApiKey(settings),
+      })
+      return
+    }
+
+    const smsKey = message.channel === 'sms' ? resolveRegistrationSmsApiKey(settings) : ''
     if (message.channel === 'sms' && smsConfigured && smsKey) {
       const response = await fetch(`https://api.kavenegar.com/v1/${encodeURIComponent(smsKey)}/verify/lookup.json`, {
         method: 'POST',

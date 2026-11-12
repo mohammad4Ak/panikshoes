@@ -67,7 +67,7 @@ function mount(kind, {
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'next/navigation': { useRouter: () => ({ push: (url) => pushes.push(url), refresh: () => { refreshes++ } }) },
     'next/link': { __esModule: true, default: 'Link' },
-    'lucide-react': { ArrowLeft: 'ArrowLeft' },
+    'lucide-react': { ArrowLeft: 'ArrowLeft', Clock3: 'Clock3', Mail: 'Mail', PencilLine: 'PencilLine', RotateCw: 'RotateCw', Smartphone: 'Smartphone' },
     '@/components/shop/AuthShell': { __esModule: true, default: 'AuthShell' },
     '@/components/shop/account.module.css': css,
     '@/lib/session-actions': { signInWithSessionLock: async (provider, options) => {

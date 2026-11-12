@@ -1,6 +1,5 @@
 'use client'
 
-import { SneakerIcon } from '@/components/ui/BrandIcons'
 import { useSiteSettings } from '@/components/layout/SiteSettingsProvider'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
@@ -19,7 +18,6 @@ export default function AuthShell({ children, register = false }: { children: Re
           <aside className={styles.authStory} data-reveal>
             <div>
               <p className={styles.eyebrow}>به {settings.storeName} خوش اومدی</p>
-              <div className={styles.authMark}><SneakerIcon size={31} /></div>
               <h2>جفت بعدی‌ات،<br /><span>قدم بعدیِ تو.</span></h2>
               <p>حس خوبِ یه انتخاب تازه؛ از پیدا کردن مدل دلخواهت تا رسیدن به دستت.</p>
             </div>

@@ -22,7 +22,6 @@
 .authStory h2 { position: relative; z-index: 1; font-size: clamp(31px, 3.4vw, 45px); line-height: 1.7; font-weight: 850; letter-spacing: -1.3px; }
 .authStory h2 span { color: rgb(var(--theme-accent, 215 247 106)); }
 .authStory p:not(.eyebrow) { font-size: 13px; color: rgb(var(--theme-line, 208 228 217)); line-height: 2.2; margin-top: 15px; max-width: 295px; }
-.authMark { display: grid; place-items: center; width: 66px; height: 66px; background: #ffffff14; border: 1px solid #ffffff20; border-radius: 23px; margin-block: 24px; color: rgb(var(--theme-accent, 215 247 106)); }
 .authBenefits { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 36px; }
 .authBenefits span { display: flex; align-items: center; gap: 7px; padding: 9px 13px; background: #ffffff12; border: 1px solid #ffffff15; border-radius: 50px; color: rgb(var(--theme-brand-soft, 224 236 228)); font-size: 10px; }
 .authOrbit { position: absolute; z-index: -1; width: 330px; height: 430px; left: -230px; top: 120px; border: 1px solid #ffffff20; border-radius: 50%; transform: rotate(-30deg); }
@@ -35,6 +34,22 @@
 .authForm input { min-height: 49px; background: #f7f9f7; border-color: rgb(var(--theme-brand-soft, 226 232 226)); border-radius: 17px; font-size: 13px; }
 .authForm button { min-height: 49px; display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 4px; }
 .authForm small { color: rgb(var(--theme-muted, 123 135 126)); font-size: 10px; display: block; margin-top: 7px; }
+.verificationInfo { min-width: 0; padding: 14px 16px 10px; border: 1px solid rgb(var(--theme-brand-soft, 226 232 226)); border-radius: 19px; background: rgb(var(--theme-surface-soft, 247 249 247)); }
+.verificationHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.verificationHeading p { display: flex; align-items: center; gap: 7px; color: rgb(var(--theme-muted, 105 116 110)); font-size: 11px; line-height: 1.8; }
+.verificationInfo svg { flex-shrink: 0; }
+.verificationDestination { display: block; margin-top: 4px; color: rgb(var(--theme-ink, 20 33 28)); font-size: 13px; font-weight: 650; overflow-wrap: anywhere; line-height: 1.9; }
+.verificationFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; border-top: 1px solid rgb(var(--theme-brand-soft, 226 232 226)); margin-top: 13px; padding-top: 8px; }
+.verificationExpiry { display: inline-flex; align-items: center; gap: 6px; color: rgb(var(--theme-muted, 105 116 110)); font-size: 10px; line-height: 1.8; }
+.verificationExpiry bdi { color: rgb(var(--theme-brand, 18 102 74)); font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.verificationExpiry[data-expired] { color: #9c5c20; }
+.verificationInfo .verificationEdit, .verificationInfo .verificationResend { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; margin: 0; padding: 6px 8px; border: 0; border-radius: 10px; background: transparent; color: rgb(var(--theme-brand, 18 102 74)); font-size: 11px; font-weight: 650; white-space: nowrap; transition: background .15s; }
+.verificationInfo .verificationResend { margin-inline-start: auto; }
+.verificationInfo button:hover:not(:disabled) { background: rgb(var(--theme-brand-soft, 234 243 238)); }
+.verificationInfo button:disabled { color: rgb(var(--theme-muted, 105 116 110)); opacity: .7; cursor: not-allowed; }
+.verificationResend bdi { font-variant-numeric: tabular-nums; }
+@media (max-width: 450px) { .verificationInfo { padding: 12px 13px 8px; } .verificationInfo .verificationEdit, .verificationInfo .verificationResend { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .verificationInfo button { transition: none; } }
 .codeEntry { position: relative; }
 .codeEntry .codeInput { position: absolute; inset: 0; width: 100%; height: 100%; font-size: 16px; opacity: 0; cursor: text; }
 .codeSlots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: clamp(5px, 1.6vw, 10px); }
@@ -145,7 +160,7 @@ a.contactItem:hover { background: rgb(var(--theme-brand-soft, 234 240 228)); }
   .authStory h2 { font-size: 29px; line-height: 1.55; }
   .authStory h2 br { display: none; }
   .authStory p:not(.eyebrow) { margin-top: 10px; max-width: none; font-size: 11px; }
-  .authMark, .authBenefits { display: none; }
+  .authBenefits { display: none; }
   .authStory .eyebrow { margin-bottom: 10px; }
   .authCard { border-radius: 28px; padding: 27px; }
   .authCard h1 { font-size: 23px; }

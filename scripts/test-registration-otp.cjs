@@ -114,6 +114,9 @@ function setup({ settings = {}, failDelivery = false, seededUsers = [], conflict
     'node:crypto': require('node:crypto'),
     'node:net': require('node:net'),
     './prisma': { prisma },
+    'node:dns/promises': { lookup: async () => { throw new Error('Unexpected SMS DNS request') } },
+    'node:https': { request: () => { throw new Error('Unexpected SMS HTTP request') } },
+    'ipaddr.js': require('ipaddr.js'),
     'bcryptjs': { hash: async (value, cost) => { hashCalls++; assert.equal(cost, 10); return `hash:${value}` } },
     './registration-delivery': { sendRegistrationCode: async (_settings, message) => {
       deliveries.push(message)
