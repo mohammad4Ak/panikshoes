@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Boxes, Check, CircleAlert, History, PackageCheck, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Warehouse, X } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Boxes, Check, CircleAlert, FileSpreadsheet, History, PackageCheck, RefreshCw, Search, ShieldAlert, SlidersHorizontal, Warehouse, X } from 'lucide-react'
+import WarehouseImport from '@/components/admin/WarehouseImport'
 import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import FormattedNumberInput from '@/components/ui/FormattedNumberInput'
 import { formatPrice } from '@/lib/utils'
@@ -85,6 +86,9 @@ export default function AdminInventoryPage() {
   const [formError, setFormError] = useState('')
   const [conflict, setConflict] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const importLock = useRef(false)
   const stockController = useRef<AbortController | null>(null)
   const historyController = useRef<AbortController | null>(null)
   const writeController = useRef<AbortController | null>(null)
@@ -189,7 +193,7 @@ export default function AdminInventoryPage() {
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (writeLock.current || !draft || conflict) return
+    if (writeLock.current || importLock.current || !draft || conflict) return
     if (!product?.inventoryConfigured || !variant || !stockFresh) { setFormError('ابتدا موجودی تازه را دریافت کنید.'); setConflict(true); return }
     const amount = Number(draft.quantity)
     if (draft.quantity === '' || !Number.isSafeInteger(amount) || amount > 2_147_483_647 || amount < (draft.mode === 'threshold' || draft.type === 'ADJUSTMENT' ? 0 : 1)) { setFormError('تعداد معتبر وارد کنید.'); return }
@@ -232,8 +236,9 @@ export default function AdminInventoryPage() {
   return <div className={styles.page}>
     <div className={admin.pageHeader}>
       <div><span className={admin.eyebrow}>کنترل موجودی فروشگاه</span><h1>انبارداری</h1><p>ورود کالا، مرجوعی و همهٔ تغییرات موجودی، رنگ‌به‌رنگ و سایزبه‌سایز.</p></div>
-      <button className={styles.secondary} type="button" disabled={loading || historyLoading || saving} onClick={() => { void loadStock(); void loadLedger() }}><RefreshCw size={16} /> تازه‌سازی</button>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}><button className={styles.secondary} type="button" disabled={saving || dialogOpen || importBusy} aria-expanded={importOpen} aria-controls="warehouse-import-panel" onClick={() => setImportOpen(current => !current)}><FileSpreadsheet size={16} /> ورود گروهی موجودی</button><button className={styles.secondary} type="button" disabled={loading || historyLoading || saving} onClick={() => { void loadStock(); void loadLedger() }}><RefreshCw size={16} /> تازه‌سازی</button></div>
     </div>
+    <div id="warehouse-import-panel"><WarehouseImport open={importOpen} disabled={saving || dialogOpen} onClose={() => setImportOpen(false)} onRecovery={() => setImportOpen(true)} onBusyChange={busy => { importLock.current = busy; setImportBusy(busy) }} onCompleted={async () => { await Promise.all([loadStock(), loadLedger()]) }} /></div>
     {notice && <p role="status" className={styles.notice}><Check size={17} />{notice}</p>}
     <div className={styles.summary} aria-label="خلاصهٔ انبار">
       {[
@@ -263,8 +268,8 @@ export default function AdminInventoryPage() {
           {!item.inventoryConfigured ? <div className={styles.setup}><CircleAlert size={18} /><p>موجودی این محصول هنوز به تفکیک رنگ و سایز تنظیم نشده است.</p><Link href="/admin/products">تنظیم در محصولات <ArrowLeft size={15} /></Link></div> : item.variants.length ? <div className={styles.variantScroll}><table className={styles.variantTable}><thead><tr><th>رنگ / سایز</th><th>قابل فروش</th><th>رزرو / آماده ارسال</th><th>معیوب</th><th>حد هشدار</th><th>عملیات</th></tr></thead><tbody>{item.variants.map(row => <tr key={row.id} className={!row.isActive ? styles.inactive : undefined}>
             <td><span className={styles.variantName}>{row.color} <b>{number(row.size)}</b></span>{!row.isActive ? <small>غیرفعال — خارج از فروش</small> : row.stock <= row.lowStockThreshold && <small className={styles.low}>موجودی کم</small>}</td>
             <td><strong>{number(row.stock)}</strong></td><td>{number(row.reserved)}</td><td className={row.damagedStock > 0 ? styles.damaged : undefined}>{number(row.damagedStock)}</td>
-            <td><button className={styles.threshold} type="button" aria-label={`تنظیم حد هشدار ${item.name} ${row.color} سایز ${row.size}`} disabled={!stockFresh || saving} onClick={() => open(item, row, 'threshold')}>{number(row.lowStockThreshold)} <SlidersHorizontal size={13} /></button></td>
-            <td><button className={styles.action} type="button" disabled={!stockFresh || saving} onClick={() => open(item, row, 'movement')}><ArrowDownToLine size={15} /> ثبت گردش</button></td>
+            <td><button className={styles.threshold} type="button" aria-label={`تنظیم حد هشدار ${item.name} ${row.color} سایز ${row.size}`} disabled={!stockFresh || saving || importBusy} onClick={() => { if (!importLock.current) open(item, row, 'threshold') }}>{number(row.lowStockThreshold)} <SlidersHorizontal size={13} /></button></td>
+            <td><button className={styles.action} type="button" disabled={!stockFresh || saving || importBusy} onClick={() => { if (!importLock.current) open(item, row, 'movement') }}><ArrowDownToLine size={15} /> ثبت گردش</button></td>
           </tr>)}</tbody></table></div> : <p className={styles.empty}>تنوعی برای این محصول ثبت نشده است.</p>}
         </article>)}</div> : !error && <p className={styles.empty}>محصولی با این شرایط پیدا نشد.</p>}
       </div>

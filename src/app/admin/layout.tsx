@@ -19,5 +19,5 @@ export default async function AdminLayout({
     redirect('/')
   }
 
-  return <AdminShell userName={session.user?.name}>{children}</AdminShell>
+  return <AdminShell userId={session.user.id} userName={session.user.name}>{children}</AdminShell>
 }

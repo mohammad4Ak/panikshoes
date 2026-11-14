@@ -33,6 +33,7 @@ function mount({ stock = inventory(), ledger = history, queues = {}, crypto: sup
     'lucide-react': new Proxy({}, { get: (_, name) => name }), '@/lib/utils': { formatPrice: String },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: props => jsx('select', props) },
     '@/components/ui/FormattedNumberInput': { __esModule: true, default: ({ onValueChange, ...props }) => jsx('input', { ...props, 'data-formatted-number': true, onChange: event => onValueChange(event.target.value) }) },
+    '@/components/admin/WarehouseImport': { __esModule: true, default: props => ({ type: 'warehouse-import', props }) },
     '@/components/admin/admin.module.css': css, './inventory.module.css': css,
   }
   const result = { exports: {} }
@@ -73,6 +74,27 @@ test('Warehouse uses independent uncached inventory/history reads and explains r
   assert.match(text(app.tree), /تا زمان ارسال/); assert.match(text(app.tree), /کالای معیوب قابل خرید نیست/)
   assert.match(text(app.tree), /کد محصول: PN-00622/)
   assert.equal(button(app, 'ثبت گردش').props.disabled, false); app.unmount()
+})
+
+test('Bulk import blocks manual stock writes synchronously and refreshes stock and history after completion', async () => {
+  const app = await ready()
+  const importer = () => find(app, node => node.type === 'warehouse-import')
+  assert.equal(importer().props.open, false)
+  button(app, 'ورود گروهی موجودی').props.onClick(); app.render()
+  assert.equal(importer().props.open, true)
+  const manual = button(app, 'ثبت گردش')
+  importer().props.onBusyChange(true)
+  manual.props.onClick(); app.render()
+  assert.equal(form(app), undefined)
+  assert.equal(button(app, 'ثبت گردش').props.disabled, true)
+  assert.equal(button(app, 'ورود گروهی موجودی').props.disabled, true)
+  importer().props.onBusyChange(false); app.render()
+  assert.equal(button(app, 'ثبت گردش').props.disabled, false)
+  await importer().props.onCompleted(); await flush(app)
+  assert.equal(reads(app).length, 4)
+  importer().props.onClose(); app.render(); assert.equal(importer().props.open, false)
+  importer().props.onRecovery(); app.render(); assert.equal(importer().props.open, true)
+  app.unmount()
 })
 test('Failed inventory read preserves the server reason and does not pretend the warehouse is empty', async () => {
   const app = await ready({ queues: { [stockUrl]: [response({ error: 'سرویس موقتاً قطع است' }, 503)] } })
