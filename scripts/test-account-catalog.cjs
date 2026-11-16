@@ -13,7 +13,7 @@ const context = (id = 'target') => ({ params: Promise.resolve({ id }) })
 const request = (body) => new Request('http://localhost/api', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 })
-const pricingSnapshot = row => ({ price: row.price, salePrice: row.salePrice ?? null, saleStartsAt: row.saleStartsAt ?? null, saleEndsAt: row.saleEndsAt ?? null })
+const pricingSnapshot = row => ({ price: row.price, salePrice: row.salePrice ?? null, saleStartsAt: row.saleStartsAt ?? null, saleEndsAt: row.saleEndsAt ?? null, pricingVersion: row.pricingVersion ?? 0 })
 
 // Execute the real modules against isolated auth/database/filesystem doubles.
 // No account, order, image upload, or database row is changed by this suite.
@@ -375,7 +375,11 @@ test('Partial price and schedule edits validate against the current product sale
   const writes = []
   const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: { product: {
     findUnique: async () => ({ ...row }),
-    update: async ({ data, where }) => { writes.push({ data, where }); return Object.assign(row, data) },
+    update: async ({ data, where }) => {
+      writes.push({ data, where })
+      const version = (row.pricingVersion ?? 0) + (data.pricingVersion?.increment ?? 0)
+      return Object.assign(row, data, { pricingVersion: version })
+    },
   } } })
   for (const changes of [{ price: 70 }, { salePrice: 100 }, { saleStartsAt: '2026-10-15T13:00:00Z' }, { saleEndsAt: '2026-10-15T09:00:00Z' }]) {
     assert.equal((await handlers.PUT(request({ ...changes, expectedPricing: pricingSnapshot(row) }), context())).status, 400, JSON.stringify(changes))
@@ -390,6 +394,28 @@ test('Partial price and schedule edits validate against the current product sale
   assert.equal(row.saleStartsAt, null)
   assert.equal(row.saleEndsAt, null)
   assert.equal(row.price, 70)
+})
+
+test('Individual price writes advance an independent version and prevent ABA or repeat legacy writes', async () => {
+  const memory = memoryInventory({ products: [{
+    id: 'target', code: 'SHOE', name: 'کتانی', price: 100, salePrice: null,
+    saleStartsAt: null, saleEndsAt: null, pricingVersion: 0,
+    sizes: [], colors: [], stock: 0, inventoryConfigured: true, inventoryVersion: 4,
+  }] })
+  const { handlers } = load('src/app/api/products/[id]/route.ts', { prisma: memory.prisma })
+  const initial = pricingSnapshot(memory.state().products[0])
+  const legacy = { ...initial }; delete legacy.pricingVersion
+  assert.equal((await handlers.PUT(request({ price: 110, expectedPricing: legacy }), context())).status, 200)
+  assert.equal(memory.state().products[0].pricingVersion, 1)
+  const nextLegacy = { ...legacy, price: 110 }
+  assert.equal((await handlers.PUT(request({ price: 120, expectedPricing: nextLegacy }), context())).status, 409)
+  assert.equal((await handlers.PUT(request({ price: 100, expectedPricing: pricingSnapshot(memory.state().products[0]) }), context())).status, 200)
+  assert.equal(memory.state().products[0].pricingVersion, 2)
+  assert.equal((await handlers.PUT(request({ price: 120, expectedPricing: initial }), context())).status, 409, 'A→B→A cannot revive an old pricing snapshot')
+  assert.equal((await handlers.PUT(request({ name: 'نام تازه' }), context())).status, 200)
+  assert.equal(memory.state().products[0].pricingVersion, 2)
+  assert.equal(memory.state().products[0].inventoryVersion, 4)
+  assert.equal(memory.state().stockMovements.length, 0)
 })
 
 test('A concurrent pricing edit cannot write a discount validated against an obsolete base price', async () => {

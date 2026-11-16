@@ -2,12 +2,13 @@
 
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { Trash2, ChevronDown, Search, SlidersHorizontal, RefreshCw, ArrowLeft, ArrowRight, PackageCheck, ClipboardList, ReceiptText, Truck, ListChecks } from 'lucide-react'
+import { Trash2, ChevronDown, Search, SlidersHorizontal, RefreshCw, ArrowLeft, ArrowRight, PackageCheck, ClipboardList, ReceiptText, Truck, ListChecks, Printer } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
 import type { InvoiceMetadata } from '@/lib/invoice'
 import type { AdminOrdersDashboard, AdminOrdersPagination } from '@/lib/admin-orders'
 import { ADMIN_ORDER_BULK_LIMIT, ADMIN_ORDER_BULK_BATCH_SIZE, type AdminOrderBulkPreviewRow, type AdminOrderBulkResult } from '@/lib/admin-order-bulk-contract'
 import InvoiceDownload from '@/components/shop/InvoiceDownload'
+import OrderDocumentsPrint, { type OrderDocumentsMode } from '@/components/admin/OrderDocumentsPrint'
 import PersianDatePicker from '@/components/ui/PersianDatePicker'
 import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import styles from '@/components/admin/admin.module.css'
@@ -124,6 +125,10 @@ export default function AdminOrdersPage() {
   const [error, setError] = useState('')
   const [busyIds, setBusyIds] = useState<string[]>([])
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printMode, setPrintMode] = useState<OrderDocumentsMode>('selected')
+  const [printBusy, setPrintBusy] = useState(false)
+  const printBusyRef = useRef(false)
   const [bulkMode, setBulkMode] = useState<BulkMode>('selected')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [bulkStatus, setBulkStatus] = useState('')
@@ -144,13 +149,14 @@ export default function AdminOrdersPage() {
   params.delete('page')
   params.delete('pageSize')
   const filterQuery = params.toString()
-  const busy = busyIds.length > 0 || bulkPhase !== null
+  const writeBusy = busyIds.length > 0 || bulkPhase !== null
+  const busy = writeBusy || printBusy
   const filtersActive = Boolean(filters.q || filters.status !== 'all' || filters.payment !== 'all' || filters.range !== 'all')
   const listReady = !loading && !loadFailed && loadedQuery === query && search.trim() === filters.q
   const bulkKey = JSON.stringify([filterQuery, bulkMode, bulkStatus, bulkMode === 'selected' ? [...selectedIds].sort() : null])
   const currentPreview = bulkPreview?.key === bulkKey ? bulkPreview : null
   const eligibleRows = currentPreview?.rows.filter(row => row.eligible) ?? []
-  const showSelection = bulkOpen && bulkMode === 'selected'
+  const showSelection = (bulkOpen && bulkMode === 'selected') || (printOpen && printMode === 'selected')
   const checkedOnPage = orders.filter(order => selectedIds.has(order.id)).length
   const allPageChecked = orders.length > 0 && checkedOnPage === orders.length
   const partlyPageChecked = checkedOnPage > 0 && !allPageChecked
@@ -248,15 +254,22 @@ export default function AdminOrdersPage() {
     clearBulkPreview()
   }
   const toggleBulk = () => {
-    if (bulkControllerRef.current || writeControllersRef.current.size > 0) return
-    clearBulkScope()
+    if (bulkControllerRef.current || printBusyRef.current || writeControllersRef.current.size > 0) return
+    clearBulkPreview()
+    setPrintOpen(false)
     setBulkMode('selected')
     setBulkStatus('')
     setBulkOpen(!bulkOpen)
   }
+  const togglePrint = () => {
+    if (bulkControllerRef.current || printBusyRef.current || writeControllersRef.current.size > 0) return
+    clearBulkPreview()
+    setBulkOpen(false)
+    setPrintOpen(previous => !previous)
+  }
 
   const toggleOrder = (id: string) => {
-    if (!showSelection || !listReady || busy || bulkControllerRef.current) return
+    if (!showSelection || !listReady || busy || bulkControllerRef.current || printBusyRef.current) return
     const next = new Set(selectedIds)
     if (next.has(id)) next.delete(id)
     else if (next.size < ADMIN_ORDER_BULK_LIMIT) next.add(id)
@@ -266,7 +279,7 @@ export default function AdminOrdersPage() {
   }
 
   const togglePage = () => {
-    if (!showSelection || !listReady || busy || bulkControllerRef.current) return
+    if (!showSelection || !listReady || busy || bulkControllerRef.current || printBusyRef.current) return
     const next = new Set(selectedIds)
     for (const order of orders) {
       if (allPageChecked) next.delete(order.id)
@@ -278,7 +291,7 @@ export default function AdminOrdersPage() {
   }
 
   const previewBulk = async () => {
-    if (!canPreview || bulkControllerRef.current || writeControllersRef.current.size > 0) return
+    if (!canPreview || bulkControllerRef.current || printBusyRef.current || writeControllersRef.current.size > 0) return
     const controller = new AbortController()
     bulkControllerRef.current = controller
     clearBulkPreview()
@@ -296,7 +309,7 @@ export default function AdminOrdersPage() {
   }
 
   const confirmBulk = async () => {
-    if (!canPreview || !currentPreview?.token || !eligibleRows.length || bulkControllerRef.current || writeControllersRef.current.size > 0) return
+    if (!canPreview || !currentPreview?.token || !eligibleRows.length || bulkControllerRef.current || printBusyRef.current || writeControllersRef.current.size > 0) return
     const controller = new AbortController()
     bulkControllerRef.current = controller
     const { token, rows } = currentPreview
@@ -333,13 +346,13 @@ export default function AdminOrdersPage() {
   }
 
   const updateFilters = (values: Partial<typeof filters>) => {
-    if (bulkControllerRef.current) return
+    if (bulkControllerRef.current || printBusyRef.current) return
     setExpandedId(null)
     if (Object.keys(values).some(key => key !== 'pageSize' && key !== 'page')) clearBulkScope()
     setFilters((previous) => ({ ...previous, ...values, page: 1 }))
   }
   const resetFilters = (values: Partial<typeof filters> = {}) => {
-    if (bulkControllerRef.current) return
+    if (bulkControllerRef.current || printBusyRef.current) return
     clearBulkScope()
     if (!Object.keys(values).length) setBulkMode('selected')
     setSearch('')
@@ -351,7 +364,7 @@ export default function AdminOrdersPage() {
   }
   const applyDates = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (bulkControllerRef.current) return
+    if (bulkControllerRef.current || printBusyRef.current) return
     if (!from || !to || from > to) { setDateError('تاریخ شروع و پایان را به ترتیب وارد کنید.'); return }
     if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 365) { setDateError('بازهٔ دلخواه باید حداکثر ۳۶۶ روز باشد.'); return }
     setDateError('')
@@ -367,14 +380,14 @@ export default function AdminOrdersPage() {
   ].filter(Boolean).join(' · ')
 
   const refreshOrders = () => {
-    if (bulkControllerRef.current || writeControllersRef.current.size > 0) return
+    if (bulkControllerRef.current || printBusyRef.current || writeControllersRef.current.size > 0) return
     setBulkPreview(null)
     void loadOrders()
   }
 
   const handleStatusChange = async (id: string, status: string) => {
     const currentOrder = orders.find((order) => order.id === id)
-    if (writeControllersRef.current.size > 0 || bulkControllerRef.current || !listReady || !currentOrder || status === currentOrder.status || !choicesFor(currentOrder).includes(status)) return
+    if (writeControllersRef.current.size > 0 || bulkControllerRef.current || printBusyRef.current || !listReady || !currentOrder || status === currentOrder.status || !choicesFor(currentOrder).includes(status)) return
     const controller = new AbortController()
     writeControllersRef.current.set(id, controller)
     loadControllerRef.current?.abort()
@@ -406,7 +419,7 @@ export default function AdminOrdersPage() {
 
   const handleDelete = async (id: string) => {
     const currentOrder = orders.find((order) => order.id === id)
-    if (writeControllersRef.current.size > 0 || bulkControllerRef.current || !listReady || !currentOrder || currentOrder.invoice || hasPaymentRecord(currentOrder) || currentOrder.verified || ['SHIPPED', 'DELIVERED'].includes(currentOrder.status)) return
+    if (writeControllersRef.current.size > 0 || bulkControllerRef.current || printBusyRef.current || !listReady || !currentOrder || currentOrder.invoice || hasPaymentRecord(currentOrder) || currentOrder.verified || ['SHIPPED', 'DELIVERED'].includes(currentOrder.status)) return
     if (!confirm('این سفارش حذف شود؟')) return
     const controller = new AbortController()
     writeControllersRef.current.set(id, controller)
@@ -471,7 +484,7 @@ export default function AdminOrdersPage() {
         <div className={ui.sectionHeading}><h2 id="orders-filters-title"><SlidersHorizontal size={17} aria-hidden="true" />جستجو و فیلتر سفارش‌ها</h2>{filtersActive && <button type="button" className={ui.reset} disabled={busy} onClick={() => resetFilters()}>پاک کردن فیلترها</button>}</div>
         <div className={ui.filterGrid}>
           <label className={ui.searchField} htmlFor="orders-search"><span>جستجو</span><div><Search size={18} aria-hidden="true" /><input id="orders-search" type="search" value={search} maxLength={120} disabled={busy} onChange={(event) => {
-            if (bulkControllerRef.current) return
+            if (bulkControllerRef.current || printBusyRef.current) return
             if (event.target.value.trim() !== filters.q) clearBulkScope()
             setSearch(event.target.value)
           }} placeholder="شماره سفارش، مشتری، تلفن یا نام کالا" /></div></label>
@@ -498,7 +511,17 @@ export default function AdminOrdersPage() {
           disabled={busy || (!bulkOpen && (!listReady || pagination.total === 0))} onClick={toggleBulk}>
           <ListChecks size={17} aria-hidden="true" />{bulkOpen ? 'بستن تغییر گروهی' : 'تغییر گروهی وضعیت'}
         </button>
+        <button type="button" className={ui.bulkToggle} aria-expanded={printOpen} aria-controls={printOpen ? 'order-documents-panel' : undefined}
+          disabled={busy || (!printOpen && (!listReady || pagination.total === 0))} onClick={togglePrint}>
+          <Printer size={17} aria-hidden="true" />{printOpen ? 'بستن چاپ دسته‌ای' : 'چاپ دسته‌ای مدارک'}
+        </button>
       </div>
+
+      <OrderDocumentsPrint open={printOpen} mode={printMode} onModeChange={next => { if (!printBusyRef.current && !bulkControllerRef.current) setPrintMode(next) }}
+        selectedIds={[...selectedIds]} filterQuery={filterQuery} filterSummary={bulkFilterSummary} filtersActive={filtersActive}
+        total={pagination.total} ready={listReady} disabled={writeBusy} sourceRevision={JSON.stringify(orders)}
+        onClearSelection={() => { if (!printBusyRef.current) clearBulkScope() }} onClose={() => { if (!printBusyRef.current) setPrintOpen(false) }}
+        onBusyChange={value => { printBusyRef.current = value; setPrintBusy(value) }} />
 
       {bulkOpen && <section id="order-bulk-panel" className={ui.bulkPanel} aria-labelledby="order-bulk-title" aria-busy={bulkPhase !== null}>
         <div className={ui.bulkHeader}>

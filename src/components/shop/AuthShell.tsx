@@ -6,13 +6,13 @@ import Link from 'next/link'
 import { ChevronLeft, MapPin, Package } from 'lucide-react'
 import styles from './account.module.css'
 
-export default function AuthShell({ children, register = false }: { children: ReactNode; register?: boolean }) {
+export default function AuthShell({ children, register = false, breadcrumb }: { children: ReactNode; register?: boolean; breadcrumb?: string }) {
   const settings = useSiteSettings()
   return (
     <div className={styles.page}>
       <div className={styles.container}>
         <nav className={styles.breadcrumb} aria-label="مسیر صفحه">
-          <Link href="/">خانه</Link><ChevronLeft size={13} /><span>{register ? 'ساخت حساب' : 'ورود به حساب'}</span>
+          <Link href="/">خانه</Link><ChevronLeft size={13} /><span>{breadcrumb ?? (register ? 'ساخت حساب' : 'ورود به حساب')}</span>
         </nav>
         <div className={styles.authLayout}>
           <aside className={styles.authStory} data-reveal>

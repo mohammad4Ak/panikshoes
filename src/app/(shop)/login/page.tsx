@@ -86,6 +86,7 @@ export default function LoginPage() {
           <label htmlFor="login-password">رمز عبور</label>
           <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="input-field" dir="ltr" placeholder="••••••••" required />
         </div>
+        <Link href="/forgot-password" className="text-sm font-semibold text-brand underline underline-offset-4">رمز عبورت را فراموش کردی؟</Link>
         <button type="submit" disabled={loading} className="btn-primary w-full disabled:opacity-50">
           {loading ? 'در حال ورود…' : 'ورود به حساب'}<ArrowLeft size={18} />
         </button>

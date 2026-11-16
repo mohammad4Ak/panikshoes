@@ -86,6 +86,7 @@ function componentApp(file, queues = {}, href = 'https://shop.example.test/admin
     '@/lib/payment-contract': contract.exports,
     '@/lib/admin-order-bulk-contract': bulkContract.exports,
     '@/components/shop/InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
+    '@/components/admin/OrderDocumentsPrint': { __esModule: true, default: 'OrderDocumentsPrint' },
     '@/components/ui/PersianDatePicker': { __esModule: true, default: 'PersianDatePicker' },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
   }

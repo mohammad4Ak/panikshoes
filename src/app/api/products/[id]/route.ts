@@ -39,6 +39,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const guardPricing = ['price', 'salePrice', 'saleStartsAt', 'saleEndsAt'].some(key => key in data)
     const expectedPricing = guardPricing ? productPricingSnapshot(body.expectedPricing) : null
     const pricingConflict = () => NextResponse.json({ error: 'قیمت یا تخفیف محصول تغییر کرده است. فرم محصول را دوباره باز کنید.', code: 'PRODUCT_PRICE_CHANGED' }, { status: 409 })
+    const expectedPricingVersion = expectedPricing?.pricingVersion ?? (guardPricing && body.expectedPricingVersion !== undefined ? integerField(body.expectedPricingVersion, 'نسخهٔ قبلی قیمت') : undefined)
+    // A legacy form without a version is safe only before the first guarded price
+    // write. Every later write requires a version, including an A→B→A change.
+    if (guardPricing && ((expectedPricingVersion === undefined && (existing.pricingVersion ?? 0) !== 0) ||
+        (expectedPricingVersion !== undefined && expectedPricingVersion !== (existing.pricingVersion ?? 0)))) return pricingConflict()
+    if (guardPricing && existing.pricingVersion === 2_147_483_647) throw new ApiInputError('نسخهٔ قیمت به سقف مجاز رسیده است.', 409)
     if (expectedPricing && (expectedPricing.price !== existing.price || expectedPricing.salePrice !== (existing.salePrice ?? null) ||
         expectedPricing.saleStartsAt?.getTime() !== existing.saleStartsAt?.getTime() || expectedPricing.saleEndsAt?.getTime() !== existing.saleEndsAt?.getTime())) return pricingConflict()
     validateProductSale(data, existing)
@@ -59,7 +65,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       const product = await prisma.$transaction(async tx => {
         if (rows && expectedVersion !== null) await configureInventory(tx, id, rows, expectedVersion, dimensions, { actorId: session.user.id, actorName: session.user.name || undefined, note: 'اصلاح موجودی در فرم ویرایش محصول' })
         return tx.product.update({
-          where: { id, ...expectedPricing }, data, include: { category: true, variants: true },
+          where: { id, ...expectedPricing, ...(guardPricing ? { pricingVersion: existing.pricingVersion } : {}) },
+          data: { ...data, ...(guardPricing ? { pricingVersion: { increment: 1 } } : {}) },
+          include: { category: true, variants: true },
         })
       })
       return NextResponse.json(productInventory(product, true))

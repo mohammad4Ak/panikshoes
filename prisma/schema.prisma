@@ -79,6 +79,50 @@ model RegistrationRateLimit {
   @@index([windowStartedAt])
 }
 
+model PasswordResetSettings {
+  id                     Int      @id @default(1)
+  enabled                Boolean  @default(true)
+  emailEnabled           Boolean  @default(true)
+  smsEnabled             Boolean  @default(false)
+  expiryMinutes          Int      @default(5)
+  maxAttempts            Int      @default(5)
+  resendSeconds          Int      @default(60)
+  destinationHourlyLimit Int      @default(5)
+  ipHourlyLimit          Int      @default(30)
+  version                Int      @default(0)
+  updatedAt              DateTime @updatedAt
+}
+
+// Unknown and unavailable accounts use the same challenge shape. No foreign key
+// is intentional: deleting an account must not reveal its prior existence.
+model PasswordResetChallenge {
+  id              String   @id
+  channel         String
+  destination     String
+  userId          String?
+  authVersion     Int?
+  settingsVersion Int
+  deliveryVersion Int
+  codeDigest      String
+  attempts        Int      @default(0)
+  expiresAt       DateTime
+  resendAt        DateTime
+  deliveredAt     DateTime?
+  consumedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  @@unique([channel, destination])
+  @@index([expiresAt])
+}
+
+model PasswordResetRateLimit {
+  key             String   @id
+  windowStartedAt DateTime
+  count           Int
+
+  @@index([windowStartedAt])
+}
+
 model Address {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -112,6 +156,8 @@ model Product {
   salePrice   Int?
   saleStartsAt DateTime?
   saleEndsAt  DateTime?
+  // Independent from stock/view updates; guards previews against price ABA.
+  pricingVersion Int @default(0)
   images      String[]
   category    Category    @relation(fields: [categoryId], references: [id])
   categoryId  String
@@ -131,6 +177,39 @@ model Product {
   orderItems  OrderItem[]
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+}
+
+// Immutable price-change snapshots intentionally have no Product/User foreign
+// keys: deleting a product or administrator must not delete audit or retry data.
+model ProductPriceChange {
+  id String @id @default(cuid())
+  batchId String
+  productId String
+  productCode String
+  productName String
+  actorId String
+  actorName String
+  fingerprint String
+  reason String
+  operation String
+  unit String
+  value Int
+  includeSalePrice Boolean
+  beforePrice Int
+  afterPrice Int
+  beforeSalePrice Int?
+  afterSalePrice Int?
+  beforeSaleStartsAt DateTime?
+  afterSaleStartsAt DateTime?
+  beforeSaleEndsAt DateTime?
+  afterSaleEndsAt DateTime?
+  beforePricingVersion Int
+  afterPricingVersion Int
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, productId])
+  @@index([productId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model ProductVariant {

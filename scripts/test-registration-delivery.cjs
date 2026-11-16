@@ -95,8 +95,30 @@ function delivery({ response, emailConfigured = true, smsConfigured = true, addr
     return smsModule.exports
   }
   vm.runInNewContext(code, { ...sandbox, module: testModule, require: requireDependency })
-  return { calls, requests, dnsCalls, send: testModule.exports.sendRegistrationCode }
+  return { calls, requests, dnsCalls, send: testModule.exports.sendRegistrationCode, reset: testModule.exports.sendPasswordResetCode }
 }
+
+test('Password recovery reuses the email transport with a recovery-specific subject and message', async () => {
+  const h = delivery({ response: new Response(null, { status: 202 }) })
+  await h.reset({ ...settings, emailSender: 'noreply' }, { channel: 'email', destination: 'buyer@example.test', code: '000123', expiresInMinutes: 5 })
+  assert.equal(h.calls.length, 1)
+  const body = JSON.parse(h.calls[0].request.body)
+  assert.deepEqual(Object.keys(body).sort(), ['from', 'subject', 'text', 'to'])
+  assert.equal(body.from, 'noreply'); assert.equal(body.to, 'buyer@example.test')
+  assert.match(body.subject, /بازیابی رمز عبور/); assert.doesNotMatch(body.subject, /ثبت‌نام/)
+  assert.match(body.text, /000123/); assert.match(body.text, /رمز شما تغییری نکرده است/)
+  assert.equal(h.calls[0].request.redirect, 'error')
+})
+
+test('Password recovery keeps failed provider details private and uses the existing verified SMS adapter', async () => {
+  const failed = delivery({ response: new Error('private key and recipient') })
+  await assert.rejects(failed.reset(settings, { channel: 'email', destination: 'buyer@example.test', code: '000123', expiresInMinutes: 5 }), { message: 'Password reset delivery failed' })
+  const accepted = delivery({ response: Response.json({ return: { status: 200 } }) })
+  await accepted.reset(settings, smsMessage)
+  assert.equal(accepted.calls.length, 1)
+  assert.equal(new URLSearchParams(accepted.calls[0].request.body).get('receptor'), smsMessage.destination)
+  assert.equal(new URLSearchParams(accepted.calls[0].request.body).get('token'), smsMessage.code)
+})
 
 test('Panik email API receives only the documented fields and uses the configured sender', async () => {
   const { calls, send } = delivery({ response: new Response(null, { status: 202 }) })

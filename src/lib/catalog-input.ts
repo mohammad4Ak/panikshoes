@@ -26,6 +26,7 @@ export function productPricingSnapshot(value: unknown) {
     salePrice: snapshot.salePrice === null ? null : integerField(snapshot.salePrice, 'قیمت تخفیفی قبلی', 1),
     saleStartsAt: saleDateField(snapshot.saleStartsAt, 'شروع تخفیف قبلی'),
     saleEndsAt: saleDateField(snapshot.saleEndsAt, 'پایان تخفیف قبلی'),
+    ...(snapshot.pricingVersion !== undefined ? { pricingVersion: integerField(snapshot.pricingVersion, 'نسخهٔ قبلی قیمت') } : {}),
   }
 }
 

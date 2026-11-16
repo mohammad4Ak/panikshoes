@@ -7,6 +7,8 @@ import MultiImageInput from '@/components/admin/MultiImageInput'
 import EnhancedSelect from '@/components/ui/EnhancedSelect'
 import PersianDatePicker from '@/components/ui/PersianDatePicker'
 import FormattedNumberInput from '@/components/ui/FormattedNumberInput'
+import ProductPriceBulk from '@/components/admin/ProductPriceBulk'
+import { PRODUCT_PRICE_BULK_LIMIT } from '@/lib/product-price-bulk-contract'
 import { formatPrice } from '@/lib/utils'
 import { productPricing } from '@/lib/pricing'
 import { toAsciiDigits } from '@/lib/localized-input'
@@ -26,6 +28,7 @@ interface Product {
   slug: string
   description: string
   price: number
+  pricingVersion?: number
   salePrice?: number | null
   saleStartsAt?: string | null
   saleEndsAt?: string | null
@@ -118,13 +121,19 @@ export default function AdminProductsPage() {
   const [originalCode, setOriginalCode] = useState<string | null>(null)
   const [originalInventory, setOriginalInventory] = useState<InventoryBaseline | null>(null)
   const [inventoryTouched, setInventoryTouched] = useState(false)
-  const [originalPricing, setOriginalPricing] = useState<Pick<Product, 'price' | 'salePrice' | 'saleStartsAt' | 'saleEndsAt'> | null>(null)
+  const [originalPricing, setOriginalPricing] = useState<Pick<Product, 'price' | 'salePrice' | 'saleStartsAt' | 'saleEndsAt' | 'pricingVersion'> | null>(null)
   const [stockConflict, setStockConflict] = useState(false)
   const [priceConflict, setPriceConflict] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const nextSpecificationKey = useRef(0)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null)
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const bulkBusyRef = useRef(false)
+  const savingRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -155,6 +164,7 @@ export default function AdminProductsPage() {
   }, [reloadKey])
 
   const openCreateModal = () => {
+    if (bulkBusyRef.current || savingRef.current) return
     setEditingId(null)
     setOriginalCode(null)
     setOriginalInventory(null)
@@ -169,12 +179,13 @@ export default function AdminProductsPage() {
 
 
   const openEditModal = (product: Product) => {
+    if (bulkBusyRef.current || savingRef.current) return
     setEditingId(product.id)
     setOriginalCode(product.code)
     const inventory = inventoryBaseline(product)
     setOriginalInventory(inventory)
     setInventoryTouched(false)
-    setOriginalPricing({ price: product.price, salePrice: product.salePrice ?? null, saleStartsAt: product.saleStartsAt ?? null, saleEndsAt: product.saleEndsAt ?? null })
+    setOriginalPricing({ price: product.price, salePrice: product.salePrice ?? null, saleStartsAt: product.saleStartsAt ?? null, saleEndsAt: product.saleEndsAt ?? null, ...(Number.isSafeInteger(product.pricingVersion) ? { pricingVersion: product.pricingVersion } : {}) })
     setStockConflict(false)
     setPriceConflict(false)
     setForm({
@@ -220,7 +231,7 @@ export default function AdminProductsPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (saving || stockConflict || priceConflict) return
+    if (savingRef.current || bulkBusyRef.current || stockConflict || priceConflict) return
     const rawCode = form.code.trim()
     if (!/^[A-Za-z0-9۰-۹٠-٩._-]{1,64}$/.test(rawCode)) {
       setMessage({ text: 'کد محصول را با حداکثر ۶۴ نویسه وارد کن؛ فقط حروف انگلیسی، عدد و نشانه‌های خط تیره، زیرخط و نقطه مجاز هستند.', error: true })
@@ -268,6 +279,7 @@ export default function AdminProductsPage() {
       setMessage({ text: 'زمان‌بندی تخفیف معتبر نیست؛ پایان باید بعد از شروع باشد.', error: true })
       return
     }
+    savingRef.current = true
     setSaving(true)
     setMessage(null)
 
@@ -316,12 +328,14 @@ export default function AdminProductsPage() {
     } catch {
       setMessage({ text: 'خطای ارتباط با سرور', error: true })
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
   const refreshStock = async (pricingOnly = false) => {
-    if (!editingId || saving) return
+    if (!editingId || savingRef.current || bulkBusyRef.current) return
+    savingRef.current = true
     setSaving(true)
     try {
       const res = await fetch(`/api/products/${encodeURIComponent(editingId)}`, { cache: 'no-store' })
@@ -329,7 +343,7 @@ export default function AdminProductsPage() {
       if (!res.ok) throw new Error(data.error || 'دریافت اطلاعات تازه انجام نشد.')
       if (pricingOnly) {
         if (!Number.isSafeInteger(data.price) || data.price < 1) throw new Error('پاسخ قیمت معتبر نیست.')
-        setOriginalPricing({ price: data.price, salePrice: data.salePrice ?? null, saleStartsAt: data.saleStartsAt ?? null, saleEndsAt: data.saleEndsAt ?? null })
+        setOriginalPricing({ price: data.price, salePrice: data.salePrice ?? null, saleStartsAt: data.saleStartsAt ?? null, saleEndsAt: data.saleEndsAt ?? null, ...(Number.isSafeInteger(data.pricingVersion) ? { pricingVersion: data.pricingVersion } : {}) })
         setForm(previous => ({ ...previous, price: String(data.price), salePrice: data.salePrice == null ? '' : String(data.salePrice), saleStartsAt: dateTimeInput(data.saleStartsAt), saleEndsAt: dateTimeInput(data.saleEndsAt) }))
         setPriceConflict(false)
       } else {
@@ -344,12 +358,16 @@ export default function AdminProductsPage() {
     } catch (cause) {
       setMessage({ text: cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'دریافت موجودی تازه انجام نشد.', error: true })
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
 
   const handleDelete = async (id: string) => {
+    if (bulkBusyRef.current || savingRef.current) return
     if (!confirm('این محصول حذف شود؟')) return
+    savingRef.current = true
+    setSaving(true)
     setMessage(null)
     try {
       const res = await fetch(`/api/products/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -358,13 +376,29 @@ export default function AdminProductsPage() {
         throw new Error(typeof data?.error === 'string' ? data.error : 'خطا در حذف محصول')
       }
       setProducts((prev) => prev.filter((p) => p.id !== id))
+      setSelectedIds(previous => previous.filter(selectedId => selectedId !== id))
     } catch (cause) {
       setMessage({ text: cause instanceof Error && cause.name !== 'TypeError' ? cause.message : 'ارتباط با سرور برقرار نشد.', error: true })
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
   const normalizedQuery = normalizeProductSearch(searchQuery)
-  const filtered = products.filter((p) => [p.name, p.code].some(value => normalizeProductSearch(value).includes(normalizedQuery)))
+  const filtered = products.filter((p) => (!categoryFilter || p.categoryId === categoryFilter) && [p.name, p.code].some(value => normalizeProductSearch(value).includes(normalizedQuery)))
+  const hiddenSelectedCount = selectedIds.filter(id => !filtered.some(product => product.id === id)).length
+  const allFilteredSelected = filtered.length > 0 && filtered.every(product => selectedIds.includes(product.id))
+  const selectionLocked = bulkBusy || saving || modalOpen || loading || !!loadError
+  const selectFiltered = () => {
+    if (bulkBusyRef.current || savingRef.current || modalOpen || loading || loadError) return
+    if (filtered.length > PRODUCT_PRICE_BULK_LIMIT) { setMessage({ text: 'نتایج بیشتر از ۲۰۰ محصول است؛ فیلتر را محدودتر کن یا محصول‌ها را جداگانه انتخاب کن.', error: true }); return }
+    setSelectedIds(filtered.map(product => product.id))
+  }
+  const toggleProduct = (id: string, checked: boolean) => {
+    if (bulkBusyRef.current || savingRef.current || modalOpen || loading || loadError) return
+    setSelectedIds(previous => checked ? previous.includes(id) || previous.length >= PRODUCT_PRICE_BULK_LIMIT ? previous : [...previous, id] : previous.filter(value => value !== id))
+  }
   const dimensions = inventoryDimensions(form.sizes, form.colors)
   const inventoryTotal = dimensions.rows.reduce((sum, row) => sum + Number(form.variantStocks[row.key] ?? '0'), 0)
 
@@ -372,7 +406,7 @@ export default function AdminProductsPage() {
     <div>
       <div className={styles.pageHeader}>
         <div><span className={styles.eyebrow}>ویترین فروشگاه</span><h1>مدیریت محصولات</h1><p>مدل‌ها، مشخصات، قیمت و موجودی را از اینجا مدیریت کن.</p></div>
-        <button onClick={openCreateModal} disabled={loading || !!loadError} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+        <button onClick={openCreateModal} disabled={loading || !!loadError || bulkBusy || saving} className="btn-primary flex items-center gap-2 disabled:opacity-50">
           <Plus className="w-5 h-5" />
           محصول جدید
         </button>
@@ -381,16 +415,29 @@ export default function AdminProductsPage() {
       {message && !modalOpen && <p role={message.error ? 'alert' : 'status'} className={`px-4 py-3 rounded-2xl mb-6 ${message.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{message.text}</p>}
 
       {/* Search */}
-      <div className={styles.searchPanel}>
+      <div className={`${styles.searchPanel} ${productStyles.filters}`}>
         <input
           type="text"
           placeholder="جستجو با نام یا کد محصول..."
           aria-label="جستجو با نام یا کد محصول"
           className="input-field"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          disabled={bulkBusy}
+          onChange={(e) => { if (!bulkBusyRef.current) setSearchQuery(e.target.value) }}
         />
+        <EnhancedSelect aria-label="فیلتر دسته‌بندی محصولات" value={categoryFilter} disabled={bulkBusy} onChange={event => { if (!bulkBusyRef.current) setCategoryFilter(event.target.value) }}><option value="">همهٔ دسته‌بندی‌ها</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</EnhancedSelect>
       </div>
+
+      <div className={productStyles.selectionBar}>
+        <div><strong>{selectedIds.length.toLocaleString('fa-IR')} محصول انتخاب‌شده</strong><small>حداکثر ۲۰۰ محصول · {filtered.length.toLocaleString('fa-IR')} نتیجهٔ فیلتر{hiddenSelectedCount > 0 ? ` · ${hiddenSelectedCount.toLocaleString('fa-IR')} انتخاب خارج از فیلتر فعلی` : ''}</small></div>
+        <div className={productStyles.selectionActions}>
+          <button type="button" className="btn-outline" disabled={selectionLocked || !filtered.length || filtered.length > PRODUCT_PRICE_BULK_LIMIT} onClick={selectFiltered}>انتخاب همه نتایج فیلتر</button>
+          <button type="button" className="btn-outline" disabled={selectionLocked || !selectedIds.length} onClick={() => { if (!bulkBusyRef.current && !savingRef.current) setSelectedIds([]) }}>پاک‌کردن انتخاب</button>
+          <button type="button" className="btn-primary" aria-expanded={bulkOpen} aria-controls="product-price-bulk-panel" disabled={bulkBusy || saving || modalOpen || loading || !!loadError || !selectedIds.length} onClick={() => { if (!bulkBusyRef.current && !savingRef.current) setBulkOpen(previous => !previous) }}>ویرایش گروهی قیمت</button>
+        </div>
+      </div>
+      {filtered.length > PRODUCT_PRICE_BULK_LIMIT && <p className={productStyles.selectionHint}>برای انتخاب همهٔ نتایج، جستجو یا دسته‌بندی را به حداکثر ۲۰۰ محصول محدود کن.</p>}
+      <div id="product-price-bulk-panel"><ProductPriceBulk open={bulkOpen} selectedIds={selectedIds} products={products} disabled={saving || modalOpen || !!loadError} onClose={() => setBulkOpen(false)} onRecovery={() => setBulkOpen(true)} onBusyChange={busy => { bulkBusyRef.current = busy; setBulkBusy(busy) }} onCompleted={() => { setLoading(true); setReloadKey(value => value + 1) }} /></div>
 
       {/* Products Table */}
       <div className={styles.tablePanel}>
@@ -403,6 +450,7 @@ export default function AdminProductsPage() {
         <table className="w-full min-w-[720px]">
             <thead className="bg-night text-white">
               <tr>
+                <th className="px-4 py-3"><input type="checkbox" className={productStyles.selectionCheckbox} aria-label="انتخاب همه محصولات فیلترشده" checked={allFilteredSelected} disabled={selectionLocked || !filtered.length || (!allFilteredSelected && filtered.length > PRODUCT_PRICE_BULK_LIMIT)} onChange={event => { if (bulkBusyRef.current || savingRef.current || modalOpen) return; if (event.target.checked) selectFiltered(); else setSelectedIds(previous => previous.filter(id => !filtered.some(product => product.id === id))) }} /></th>
                 <th className="px-4 py-3 md:px-6 md:py-4 text-right">نام محصول</th>
                 <th className="px-4 py-3 md:px-6 md:py-4 text-right">دسته بندی</th>
                 <th className="px-4 py-3 md:px-6 md:py-4 text-right">قیمت</th>
@@ -414,6 +462,7 @@ export default function AdminProductsPage() {
             <tbody className="divide-y divide-line">
               {filtered.map((product) => (
                 <tr key={product.id} className="hover:bg-fog/30">
+                  <td className="px-4 py-3"><input type="checkbox" className={productStyles.selectionCheckbox} aria-label={`انتخاب ${product.name}، کد ${product.code}`} checked={selectedIds.includes(product.id)} disabled={selectionLocked || (!selectedIds.includes(product.id) && selectedIds.length >= PRODUCT_PRICE_BULK_LIMIT)} onChange={event => toggleProduct(product.id, event.target.checked)} /></td>
                   <td className="px-4 py-3 md:px-6 md:py-4 font-medium">{product.name}<small className={productStyles.productCode}>کد: <bdi dir="ltr">{product.code}</bdi></small></td>
                   <td className="px-6 py-4">
                     <span className="px-3 py-1 bg-brand/10 text-brand rounded-full text-sm">
@@ -436,6 +485,7 @@ export default function AdminProductsPage() {
                       </Link>
                       <button
                         onClick={() => openEditModal(product)}
+                        disabled={bulkBusy || saving}
                         className="p-2 hover:bg-fog rounded-2xl transition-colors"
                         title="ویرایش"
                       >
@@ -443,6 +493,7 @@ export default function AdminProductsPage() {
                       </button>
                       <button
                         onClick={() => handleDelete(product.id)}
+                        disabled={bulkBusy || saving}
                         className="p-2 hover:bg-fog rounded-2xl transition-colors"
                         title="حذف"
                       >
@@ -454,7 +505,7 @@ export default function AdminProductsPage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-mist">
+                  <td colSpan={7} className="px-6 py-8 text-center text-mist">
                     محصولی پیدا نشد
                   </td>
                 </tr>

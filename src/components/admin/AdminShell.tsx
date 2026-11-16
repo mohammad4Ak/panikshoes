@@ -22,6 +22,7 @@ import {
   Warehouse,
   PackageCheck,
   ShieldCheck,
+  KeyRound,
   Menu,
   X,
   Pin,
@@ -52,6 +53,7 @@ const adminNavGroups = [
   { id: 'customers', label: 'مشتریان', Icon: Users, items: [
     { href: '/admin/users', label: 'مدیریت کاربران', Icon: Users },
     { href: '/admin/reviews', label: 'نظرات و امتیازها', Icon: MessageSquareText },
+    { href: '/admin/password-reset', label: 'بازیابی رمز عبور', Icon: KeyRound },
   ] },
   { id: 'settings', label: 'تنظیمات فروشگاه', Icon: Settings2, items: [
     { href: '/admin/settings', label: 'تنظیمات عمومی', Icon: Settings2 },

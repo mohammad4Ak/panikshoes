@@ -63,12 +63,21 @@ export function assertInventoryAvailable(product: { id: string; name: string; in
 }
 
 /** Parent product locks serialize all edits/movements; variant guards prevent overselling a combination. */
-export async function reserveInventory(tx: Prisma.TransactionClient, items: InventoryItem[], options: { allowLegacy?: boolean; context?: MovementContext } = {}): Promise<Map<string, string>> {
+export async function reserveInventory(tx: Prisma.TransactionClient, items: InventoryItem[], options: { allowLegacy?: boolean; context?: MovementContext; expectedPricingVersions?: Map<string, number> } = {}): Promise<Map<string, string>> {
   const variants = new Map<string, string>()
   for (const [productId, entries] of groups(items)) {
+    const guardPricing = options.expectedPricingVersions?.has(productId) ?? false
+    const expectedPricingVersion = options.expectedPricingVersions?.get(productId)
     // An increment both locks and invalidates every stale admin inventory form.
-    const locked = await tx.product.update({ where: { id: productId }, data: { inventoryVersion: { increment: 1 } } }).catch(error => {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') throw unavailable(productId, 'محصول', entries.values().next().value!)
+    // New checkout additionally claims the price revision used for its totals.
+    const locked = await tx.product.update({ where: { id: productId, ...(guardPricing ? { pricingVersion: expectedPricingVersion } : {}) }, data: { inventoryVersion: { increment: 1 } } }).catch(async error => {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+        if (guardPricing) {
+          const current = await tx.product.findUnique({ where: { id: productId }, select: { pricingVersion: true } })
+          if (current && current.pricingVersion !== expectedPricingVersion) throw new InventoryError('قیمت محصولات تغییر کرده است؛ مبلغ جدید را بازبینی و دوباره سفارش را ثبت کنید', 409, 'ORDER_PRICES_CHANGED')
+        }
+        throw unavailable(productId, 'محصول', entries.values().next().value!)
+      }
       throw error
     })
     const quantity = [...entries.values()].reduce((sum, item) => sum + item.quantity, 0)

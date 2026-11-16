@@ -34,6 +34,8 @@ function mount(initial = product(), queues = {}) {
     '@/lib/utils': { formatPrice: String }, '@/lib/pricing': pricing.exports,
     '@/lib/localized-input': localizedInput.exports,
     '@/components/admin/MultiImageInput': { __esModule: true, default: 'Images' },
+    '@/components/admin/ProductPriceBulk': { __esModule: true, default: 'ProductPriceBulk' },
+    '@/lib/product-price-bulk-contract': { PRODUCT_PRICE_BULK_LIMIT: 200 },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: 'select' },
     '@/components/ui/PersianDatePicker': { __esModule: true, default: ({ onChange, ...props }) => jsx('input', { ...props, onChange: event => onChange(event.target.value) }) },
     '@/components/ui/FormattedNumberInput': { __esModule: true, default: ({ onValueChange, ...props }) => jsx('input', { ...props, 'data-number': true, onChange: event => onValueChange(event.target.value) }) },

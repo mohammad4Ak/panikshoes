@@ -13,7 +13,7 @@ interface RegistrationCodeMessage {
   expiresInMinutes: number
 }
 
-export async function sendRegistrationCode(settings: RegistrationSettings, message: RegistrationCodeMessage): Promise<void> {
+async function sendCode(settings: RegistrationSettings, message: RegistrationCodeMessage, purpose: 'registration' | 'password-reset'): Promise<void> {
   const { emailConfigured, smsConfigured } = getRegistrationDeliveryReadiness(settings)
   const emailKey = process.env.REGISTRATION_EMAIL_API_KEY?.trim()
 
@@ -25,8 +25,10 @@ export async function sendRegistrationCode(settings: RegistrationSettings, messa
         body: JSON.stringify({
           to: message.destination,
           from: settings.emailSender,
-          subject: 'کد تأیید ثبت‌نام کفش پانیک',
-          text: `کد تأیید ثبت‌نام شما: ${message.code}\n\nاین کد تا ${message.expiresInMinutes.toLocaleString('fa-IR')} دقیقه معتبر است. آن را در اختیار کسی نگذارید. اگر درخواست ثبت‌نام نداده‌اید، این پیام را نادیده بگیرید.`,
+          subject: purpose === 'password-reset' ? 'کد بازیابی رمز عبور کفش پانیک' : 'کد تأیید ثبت‌نام کفش پانیک',
+          text: purpose === 'password-reset'
+            ? `کد بازیابی رمز عبور شما: ${message.code}\n\nاین کد تا ${message.expiresInMinutes.toLocaleString('fa-IR')} دقیقه معتبر است. آن را در اختیار کسی نگذارید. اگر درخواست بازیابی رمز عبور نداده‌اید، این پیام را نادیده بگیرید؛ رمز شما تغییری نکرده است.`
+            : `کد تأیید ثبت‌نام شما: ${message.code}\n\nاین کد تا ${message.expiresInMinutes.toLocaleString('fa-IR')} دقیقه معتبر است. آن را در اختیار کسی نگذارید. اگر درخواست ثبت‌نام نداده‌اید، این پیام را نادیده بگیرید.`,
         }),
         redirect: 'error',
         signal: AbortSignal.timeout(8_000),
@@ -56,5 +58,13 @@ export async function sendRegistrationCode(settings: RegistrationSettings, messa
     // Provider errors can include request URLs, credentials, or recipients.
   }
 
-  throw new Error('Registration delivery failed')
+  throw new Error(purpose === 'password-reset' ? 'Password reset delivery failed' : 'Registration delivery failed')
+}
+
+export function sendRegistrationCode(settings: RegistrationSettings, message: RegistrationCodeMessage): Promise<void> {
+  return sendCode(settings, message, 'registration')
+}
+
+export function sendPasswordResetCode(settings: RegistrationSettings, message: RegistrationCodeMessage): Promise<void> {
+  return sendCode(settings, message, 'password-reset')
 }

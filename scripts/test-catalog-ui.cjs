@@ -12,6 +12,8 @@ const contactModule = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/customer-contact.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: contactModule })
 const bulkOrderContract = { exports: {} }
 vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/admin-order-bulk-contract.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: bulkOrderContract })
+const bulkPriceContract = { exports: {} }
+vm.runInNewContext(transformSync(readFileSync(path.join(__dirname, '../src/lib/product-price-bulk-contract.ts'), 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code, { module: bulkPriceContract })
 
 // Execute the real page handlers with hook and fetch doubles. No server or DB is contacted.
 const shoe = { id: 'shoe-1', code: 'PANIK-00622', name: 'کفش آدیداس', slug: 'adidas-ultra', description: 'Lightweight trail runner', price: 100000, images: [], stock: 5, inventoryConfigured: true, inventoryVersion: 1, variants: [{ id: 'variant-1', size: 42, color: 'سبز', stock: 5, isActive: true }], sizes: [42], colors: ['سبز'], featured: false, categoryId: 'cat-1', category: { name: 'کتانی' } }
@@ -87,7 +89,9 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     '@/components/shop/ProductCard': { __esModule: true, default: 'ProductCard' },
     '@/components/layout/SiteSettingsProvider': { useSiteSettings: () => ({ storeName: 'کفش لند' }) },
     '@/components/shop/InvoiceDownload': { __esModule: true, default: 'InvoiceDownload' },
+    '@/components/admin/OrderDocumentsPrint': { __esModule: true, default: 'OrderDocumentsPrint' },
     '@/components/admin/MultiImageInput': { __esModule: true, default: 'MultiImageInput' },
+    '@/components/admin/ProductPriceBulk': { __esModule: true, default: 'ProductPriceBulk' },
     '@/components/ui/EnhancedSelect': { __esModule: true, default: props => jsx('select', { ...props, 'data-enhanced-select': true }) },
     '@/components/ui/FormattedNumberInput': { __esModule: true, default: ({ onValueChange, ...props }) => jsx('input', { ...props, type: 'text', 'data-formatted-number': true, onChange: event => onValueChange(event.target.value) }) },
     '@/components/ui/PersianDatePicker': { __esModule: true, default: ({ onChange, ...props }) => jsx('input', { ...props, type: 'text', 'data-persian-date': true, onChange: event => onChange(event.target.value) }) },
@@ -96,6 +100,7 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     '@/lib/localized-input': localizedInputModule.exports,
     '@/lib/customer-contact': contactModule.exports,
     '@/lib/admin-order-bulk-contract': bulkOrderContract.exports,
+    '@/lib/product-price-bulk-contract': bulkPriceContract.exports,
     '@/lib/session-actions': { signOutWithSessionLock: async () => {} },
     '@/components/shop/commerce.module.css': css,
     '@/components/admin/admin.module.css': css,
@@ -140,6 +145,102 @@ function text(tree) {
 const find = (app, predicate) => nodes(app.tree).find(predicate)
 const retry = (app) => find(app, (node) => node.type === 'button' && text(node) === 'تلاش دوباره')
 const cards = (app) => nodes(app.tree).filter((node) => node.type === 'ProductCard')
+
+test('Order printing shares selection with status tools, carries complete filters, and locks stale page handlers', async () => {
+  const app = page('src/app/admin/orders/page.tsx')
+  await settle(); app.render()
+  find(app, node => node.type === 'button' && text(node) === 'چاپ دسته‌ای مدارک').props.onClick(); app.render()
+  const selected = find(app, node => node.type === 'input' && node.props['aria-label'] === `انتخاب سفارش ${order().id.slice(-6)}`)
+  selected.props.onChange(); app.render()
+  let panel = find(app, node => node.type === 'OrderDocumentsPrint')
+  assert.equal(panel.props.open, true)
+  assert.deepEqual(Array.from(panel.props.selectedIds), [order().id])
+  assert.equal(new URLSearchParams(panel.props.filterQuery).has('page'), false)
+  assert.equal(new URLSearchParams(panel.props.filterQuery).has('pageSize'), false)
+  const oldDelete = find(app, node => node.type === 'button' && node.props['aria-label'] === `حذف سفارش ${order().id.slice(-6)}`)
+  const oldSearch = find(app, node => node.props.id === 'orders-search')
+  const oldRefresh = find(app, node => node.type === 'button' && text(node).includes('تازه‌سازی'))
+  const requestCount = app.requests.length
+  panel.props.onBusyChange(true)
+  selected.props.onChange(); oldSearch.props.onChange({ target: { value: 'different buyer' } }); oldRefresh.props.onClick()
+  assert.ok(oldDelete)
+  await oldDelete.props.onClick()
+  app.render()
+  assert.equal(app.requests.length, requestCount, 'Locked stale handlers cannot mutate or reload the order list')
+  assert.equal(find(app, node => node.props.id === 'orders-search').props.value, '')
+  assert.deepEqual(Array.from(find(app, node => node.type === 'OrderDocumentsPrint').props.selectedIds), [order().id])
+  panel.props.onBusyChange(false); app.render()
+  find(app, node => node.type === 'button' && text(node) === 'تغییر گروهی وضعیت').props.onClick(); app.render()
+  assert.equal(find(app, node => node.type === 'OrderDocumentsPrint').props.open, false)
+  find(app, node => node.type === 'button' && text(node) === 'چاپ دسته‌ای مدارک').props.onClick(); app.render()
+  panel = find(app, node => node.type === 'OrderDocumentsPrint')
+  assert.deepEqual(Array.from(panel.props.selectedIds), [order().id], 'Switching tools preserves deliberate selection')
+  panel.props.onClearSelection(); app.render()
+  assert.equal(find(app, node => node.type === 'OrderDocumentsPrint').props.selectedIds.length, 0)
+  app.unmount()
+})
+
+test('Bulk prices selects exactly the current category/search results and shows selections outside the filter', async () => {
+  const other = { ...shoe, id: 'shoe-2', code: 'PANIK-00620', name: 'لوفر', categoryId: 'cat-2' }
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([shoe, other])], '/api/categories': [response([category, { id: 'cat-2', name: 'رسمی' }])] } })
+  await settle(); app.render()
+  find(app, node => node.type === 'input' && node.props['aria-label'] === `انتخاب ${other.name}، کد ${other.code}`).props.onChange({ target: { checked: true } }); app.render()
+  find(app, node => node.props['aria-label'] === 'فیلتر دسته‌بندی محصولات').props.onChange({ target: { value: category.id } }); app.render()
+  assert.match(text(app.tree), /۱ انتخاب خارج از فیلتر فعلی/)
+  find(app, node => node.type === 'button' && text(node) === 'انتخاب همه نتایج فیلتر').props.onClick(); app.render()
+  assert.deepEqual(Array.from(find(app, node => node.type === 'ProductPriceBulk').props.selectedIds), [shoe.id])
+  find(app, node => node.props['aria-label'] === 'جستجو با نام یا کد محصول').props.onChange({ target: { value: '۰۰۶۲۰' } }); app.render()
+  assert.equal(nodes(app.tree).filter(node => node.props.title === 'ویرایش').length, 0, 'Search and category must be combined')
+  assert.equal(find(app, node => node.type === 'button' && text(node) === 'انتخاب همه نتایج فیلتر').props.disabled, true)
+  app.unmount()
+})
+
+test('Bulk prices refuses oversized filtered selection instead of silently selecting a truncated set', async () => {
+  const products = Array.from({ length: 201 }, (_, index) => ({ ...shoe, id: `shoe-${index}`, code: `PANIK-${index}` }))
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response(products)] } })
+  await settle(); app.render()
+  const select = find(app, node => node.type === 'button' && text(node) === 'انتخاب همه نتایج فیلتر')
+  assert.equal(select.props.disabled, true)
+  select.props.onClick(); app.render()
+  assert.equal(find(app, node => node.type === 'ProductPriceBulk').props.selectedIds.length, 0)
+  assert.match(text(app.tree), /نتایج بیشتر از ۲۰۰ محصول است/)
+  app.unmount()
+})
+
+test('Bulk prices locks product edits and selection synchronously, then refreshes canonical products after saving', async () => {
+  const fresh = { ...shoe, price: 110000, pricingVersion: 1 }
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([shoe]), response([fresh])] } })
+  await settle(); app.render()
+  const oldEdit = find(app, node => node.props.title === 'ویرایش')
+  const oldSelect = find(app, node => node.type === 'button' && text(node) === 'انتخاب همه نتایج فیلتر')
+  let panel = find(app, node => node.type === 'ProductPriceBulk')
+  panel.props.onBusyChange(true)
+  oldEdit.props.onClick(); oldSelect.props.onClick(); app.render()
+  assert.equal(find(app, node => node.type === 'form'), undefined)
+  assert.equal(find(app, node => node.type === 'ProductPriceBulk').props.selectedIds.length, 0)
+  assert.equal(find(app, node => node.props.title === 'ویرایش').props.disabled, true)
+  panel.props.onBusyChange(false)
+  panel.props.onCompleted(); app.render(); await settle(); app.render()
+  panel = find(app, node => node.type === 'ProductPriceBulk')
+  assert.equal(panel.props.products[0].price, fresh.price)
+  assert.equal(panel.props.products[0].pricingVersion, 1)
+  assert.equal(app.requests.filter(request => request.url === '/api/products').length, 2)
+  assert.equal(app.requests.some(request => request.method === 'PUT' || request.method === 'DELETE'), false)
+  app.unmount()
+})
+
+test('Individual price edits include the pricing revision from the original product snapshot', async () => {
+  const versioned = { ...shoe, pricingVersion: 7 }
+  const app = page('src/app/admin/products/page.tsx', { queues: { '/api/products': [response([versioned])], 'PUT /api/products/shoe-1': [response({ ...versioned, price: 120000, pricingVersion: 8 })] } })
+  await settle(); app.render()
+  find(app, node => node.props.title === 'ویرایش').props.onClick(); app.render()
+  find(app, node => node.type === 'input' && node.props['data-formatted-number'] && node.props.value === '100000').props.onChange({ target: { value: '120000' } }); app.render()
+  await find(app, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  const saved = JSON.parse(app.requests.find(request => request.method === 'PUT').body)
+  assert.equal(saved.expectedPricing.pricingVersion, 7)
+  assert.equal(saved.expectedPricing.price, 100000)
+  app.unmount()
+})
 
 test('Renaming a product does not resend the stale stock shown when the edit modal opened', async () => {
   const app = page('src/app/admin/products/page.tsx', {

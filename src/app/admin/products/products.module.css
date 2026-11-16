@@ -55,6 +55,17 @@
 .tablePrice small { color: rgb(var(--theme-brand, 18 102 74)); font-size: 10px; }
 .productCode { display: block; margin-top: 5px; font-size: 11px; font-weight: 400; color: rgb(var(--theme-muted, 105 116 110)); }
 .productCode bdi { overflow-wrap: anywhere; }
+.filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, .45fr); gap: 12px; }
+.selectionBar { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 16px; margin-bottom: 20px; padding: 18px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 20px; background: white; }
+.selectionBar strong { font-size: 13px; }
+.selectionBar small { display: block; font-size: 10px; color: rgb(var(--theme-muted, 105 116 110)); margin-top: 7px; line-height: 1.8; }
+.selectionActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.selectionActions button { font-size: 11px; padding: 11px 14px; }
+.selectionActions button:disabled { opacity: .4; cursor: not-allowed; }
+.selectionCheckbox { width: 19px; height: 19px; accent-color: rgb(var(--theme-brand, 18 102 74)); cursor: pointer; }
+.selectionCheckbox:disabled { opacity: .4; cursor: not-allowed; }
+.selectionHint { font-size: 11px; color: #9b6c2d; margin: -8px 0 20px; line-height: 2; }
+@media (max-width: 640px) { .filters { grid-template-columns: minmax(0, 1fr); } .selectionActions { width: 100%; } .selectionActions button { flex-grow: 1; min-height: 44px; } }
 .inventory { min-width: 0; padding: 19px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 23px; background: rgb(var(--theme-surface-soft, 247 250 248)); }
 .inventory legend { padding-inline: 7px; font-size: 14px; font-weight: 750; }
 .inventoryScroll { max-height: 360px; overflow: auto; margin-top: 14px; border: 1px solid rgb(var(--theme-brand-soft, 224 234 227)); border-radius: 17px; background: white; }

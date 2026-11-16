@@ -1,0 +1,8 @@
+.channels { display: flex; flex-wrap: wrap; gap: 8px; }
+.hint, .genericNotice { font-size: 11px; line-height: 2; color: rgb(var(--theme-muted, 105 116 110)); }
+.hint { margin-top: -10px; }
+.genericNotice { margin-top: 9px; }
+.retry { margin-top: 8px; text-decoration: underline; text-underline-offset: 4px; font-weight: 700; }
+.success { display: grid; gap: 18px; }
+.success > p { display: flex; gap: 8px; align-items: center; color: rgb(var(--theme-brand, 18 102 74)); font-weight: 750; font-size: 16px; }
+.success > span { color: rgb(var(--theme-muted, 105 116 110)); font-size: 12px; line-height: 2; }

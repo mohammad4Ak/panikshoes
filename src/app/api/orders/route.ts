@@ -224,6 +224,7 @@ export async function POST(request: Request) {
       const now = new Date()
       const orderItemsData = []
       const products = new Map<string, Product>()
+      const expectedPricingVersions = new Map<string, number>()
       for (const item of items) {
         // Ignore client prices and calculate both shipping and totals from database prices.
         let product = products.get(item.productId)
@@ -234,6 +235,7 @@ export async function POST(request: Request) {
           })
           product = stored
           products.set(item.productId, stored)
+          if (typeof stored.pricingVersion === 'number') expectedPricingVersions.set(item.productId, stored.pricingVersion)
         }
         if (!product.sizes.includes(item.size) ||
             (product.colors.length > 0 ? !product.colors.includes(item.color) : item.color !== '-')) {
@@ -277,7 +279,7 @@ export async function POST(request: Request) {
       orderItemsData.forEach((item, index) => { item.couponDiscount = allocated[index] })
 
       const orderId = randomUUID()
-      const reservedVariants = await reserveInventory(tx, items, { context: {
+      const reservedVariants = await reserveInventory(tx, items, { expectedPricingVersions, context: {
         orderId, actorId: session.user.id, actorName: session.user.name || undefined, note: 'رزرو موجودی هنگام ثبت سفارش',
       } })
       const reservedItems = orderItemsData.map(item => ({ ...item, variantId: reservedVariants.get(inventoryKey(item.productId, item.size, item.color))! }))
