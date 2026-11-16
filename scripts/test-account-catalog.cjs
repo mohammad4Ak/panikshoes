@@ -23,7 +23,32 @@ function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now
   // Metadata/pricing tests perform one update and inspect its exact guard. Their
   // old delegates need the API's transaction boundary; inventory atomicity uses
   // the real rollback-capable memory adapter below and in test-inventory.cjs.
-  const database = prisma.$transaction ? prisma : { ...prisma, $transaction: callback => callback(prisma) }
+  let database = prisma.$transaction ? prisma : { ...prisma, $transaction: callback => callback(prisma) }
+  if (file === 'src/lib/auth.ts') {
+    const attempts = new Map()
+    database = {
+      ...prisma,
+      loginSecuritySettings: { findUnique: async () => null },
+      loginAttemptWindow: {
+        findUnique: async ({ where }) => attempts.get(where.key) ?? null,
+        upsert: async ({ where, create, update }) => {
+          const row = attempts.has(where.key) ? { ...attempts.get(where.key), ...update } : { ...create }
+          attempts.set(where.key, row)
+          return row
+        },
+        deleteMany: async ({ where }) => {
+          let count = 0
+          for (const [key, row] of attempts) if (where.key ? key === where.key
+            : row.updatedAt < where.updatedAt.lt && (!row.blockedUntil || row.blockedUntil <= where.OR[1].blockedUntil.lte)) {
+            attempts.delete(key); count++
+          }
+          return { count }
+        },
+      },
+      $queryRaw: async () => [{ locked: 1 }],
+      $transaction: async callback => callback(database),
+    }
+  }
   const dependencies = {
     'next/server': { NextResponse: Response },
     'node:crypto': require('node:crypto'),
@@ -35,7 +60,7 @@ function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now
     '@/lib/auth': { auth: async () => session },
     '@/lib/payments': { expireUnpaidOrders: async () => 0 },
     'bcryptjs': { hash: async () => 'hash', compare: async () => true, ...bcrypt },
-    'next-auth': (config) => { authConfig = config; return {} },
+    'next-auth': Object.assign(config => { authConfig = config; return {} }, { CredentialsSignin: class extends Error {} }),
     'next-auth/providers/credentials': (config) => config,
     'fs/promises': files,
     path,
@@ -55,7 +80,7 @@ function load(file, { session = admin, prisma = {}, bcrypt = {}, files = {}, now
     }
     vm.runInNewContext(code, { module: testModule, require: requireDependency, Response, Headers, Buffer, URL,
       Date: class extends Date { static now() { return now() } },
-      process: { env: {}, cwd: () => root } }, { filename: absolute })
+      process: { env: file === 'src/lib/auth.ts' ? { AUTH_SECRET: 'account-catalog-isolated-login-test-secret-32' } : {}, cwd: () => root } }, { filename: absolute })
     cache.set(absolute, testModule.exports)
     return testModule.exports
   }
@@ -205,7 +230,8 @@ test('Login validates credential types and finds existing mixed-case email accou
     query = value
     return { id: 'user', email: 'Mixed@Example.com', password: 'hash', role: 'USER', name: 'Name' }
   } } } })
-  const authorize = authConfig().providers[0].authorize
+  const authorize = credentials => authConfig().providers[0].authorize(credentials,
+    new Request('http://localhost/api/auth/callback/credentials', { method: 'POST' }))
   assert.equal(await authorize({ email: {}, password: [] }), null)
   assert.equal((await authorize({ email: ' mixed@example.com ', password: 'abcdef' })).id, 'user')
   assert.equal(query.where.email.equals, 'mixed@example.com')

@@ -187,7 +187,7 @@ const routeHrefs = (tree) => links(tree).map(({ props }) => props.href)
 const groups = {
   sales: ['/admin/orders', '/admin/payments', '/admin/shipments', '/admin/coupons'],
   catalog: ['/admin/products', '/admin/categories', '/admin/inventory'],
-  customers: ['/admin/users', '/admin/reviews', '/admin/password-reset'],
+  customers: ['/admin/users', '/admin/reviews', '/admin/password-reset', '/admin/login-security'],
   settings: ['/admin/settings', '/admin/payment-methods', '/admin/shipping', '/admin/registration'],
 }
 const overviewRoutes = ['/admin', '/admin/analytics']
@@ -202,7 +202,7 @@ const quickNav = (app, mode = 'desktop') => nodes(app.tree).find((node) => node.
 const routeLabels = {
   '/admin/orders': 'سفارش‌ها', '/admin/payments': 'بررسی پرداخت‌ها', '/admin/shipments': 'رهگیری مرسوله‌ها', '/admin/coupons': 'کدهای تخفیف',
   '/admin/products': 'محصولات', '/admin/categories': 'دسته‌بندی محصولات', '/admin/inventory': 'انبارداری',
-  '/admin/users': 'مدیریت کاربران', '/admin/reviews': 'نظرات و امتیازها', '/admin/password-reset': 'بازیابی رمز عبور', '/admin/settings': 'تنظیمات عمومی',
+  '/admin/users': 'مدیریت کاربران', '/admin/reviews': 'نظرات و امتیازها', '/admin/password-reset': 'بازیابی رمز عبور', '/admin/login-security': 'امنیت ورود', '/admin/settings': 'تنظیمات عمومی',
   '/admin/payment-methods': 'روش‌های پرداخت', '/admin/shipping': 'روش‌های ارسال', '/admin/registration': 'ثبت‌نام و تأیید حساب',
 }
 const pinButton = (app, href, mode = 'desktop') => nodes(nav(app, mode)).find((node) => node.type === 'button' && [

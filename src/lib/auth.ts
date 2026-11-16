@@ -1,10 +1,16 @@
-import NextAuth from 'next-auth'
+import NextAuth, { CredentialsSignin } from 'next-auth'
 import type {} from '@auth/core/jwt'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { prisma } from './prisma'
-import bcrypt from 'bcryptjs'
 import { SESSION_IDLE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_SECONDS } from './session-policy'
-import { caseInsensitiveEmailFilter, normalizeLoginPhone } from './customer-contact'
+import { authorizePasswordLogin, LoginRateLimitError } from './login-security'
+
+class LoginThrottled extends CredentialsSignin {
+  constructor(seconds: number) {
+    super()
+    this.code = `login_throttled_${seconds}`
+  }
+}
 
 declare module 'next-auth' {
   interface User {
@@ -41,35 +47,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         loginPhone: { label: 'Mobile number', type: 'tel' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
-        const email = typeof credentials?.email === 'string' ? credentials.email.trim() : ''
-        const loginPhone = normalizeLoginPhone(credentials?.loginPhone)
-        if ((!email && !loginPhone) || (email && loginPhone) ||
-            typeof credentials?.password !== 'string' || !credentials.password) return null
-
-        const user = loginPhone
-          ? await prisma.user.findUnique({ where: { loginPhone } })
-          : await prisma.user.findFirst({ where: { email: caseInsensitiveEmailFilter(email) } })
-
-        if (!user || user.isActive === false || (loginPhone && !user.phoneVerifiedAt)) {
-          return null
-        }
-
-        const isPasswordValid = await bcrypt.compare(
-          credentials.password,
-          user.password
-        )
-
-        if (!isPasswordValid) {
-          return null
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          authVersion: user.authVersion,
+      async authorize(credentials, request) {
+        try { return await authorizePasswordLogin(credentials, request) }
+        catch (error) {
+          if (error instanceof LoginRateLimitError) throw new LoginThrottled(error.retryAfterSeconds)
+          throw error
         }
       },
     }),

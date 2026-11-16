@@ -20,7 +20,7 @@ function load(file, { session = admin, prisma = {}, bcrypt = {} } = {}) {
     '@/lib/prisma': { prisma }, './prisma': { prisma },
     '@/lib/auth': { auth: async () => session },
     'bcryptjs': { hash: async value => `hash:${value}`, compare: async () => true, ...bcrypt },
-    'next-auth': config => { authConfig = config; return {} },
+    'next-auth': Object.assign(config => { authConfig = config; return {} }, { CredentialsSignin: class extends Error {} }),
     'next-auth/providers/credentials': config => config,
   }
   function read(filename) {
@@ -28,8 +28,10 @@ function load(file, { session = admin, prisma = {}, bcrypt = {} } = {}) {
     if (cache.has(absolute)) return cache.get(absolute)
     const testModule = { exports: {} }
     const source = transformSync(readFileSync(absolute, 'utf8'), { loader: 'ts', format: 'cjs', target: 'es2022' }).code
-    vm.runInNewContext(source, { module: testModule, Response, Buffer, Date, require: name => {
+    vm.runInNewContext(source, { module: testModule, Response, Buffer, Date,
+      process: { env: { AUTH_SECRET: 'customer-support-isolated-login-test-secret-32' } }, require: name => {
       if (name in dependencies) return dependencies[name]
+      if (name.startsWith('node:') || name === 'ipaddr.js') return require(name)
       if (name.startsWith('@/lib/')) return read(`src/lib/${name.slice(6)}.ts`)
       if (name.startsWith('./')) return read(path.join(path.dirname(filename), `${name}.ts`))
       throw new Error(`Unexpected dependency ${name}`)
@@ -48,6 +50,7 @@ function database() {
     ],
     addresses: [{ id: 'home', userId: 'buyer', title: 'خانه', address: 'نشانی اصلی', phone: '09123456789', postalCode: '1234567890', isDefault: true }],
     orders: [{ id: 'historical-order', userId: 'buyer', verified: true, total: 500, phone: '09123456789', postalCode: '1234567890', address: 'نشانی اصلی', status: 'PROCESSING', receipts: [{ id: 'receipt', data: 'secret image', status: 'APPROVED' }], items: [] }],
+    loginWindows: [],
   }
   const writes = []
   const queries = []
@@ -72,6 +75,25 @@ function database() {
     }))
   }
   const db = {
+    loginSecuritySettings: { findUnique: async () => null },
+    loginAttemptWindow: {
+      findUnique: async ({ where }) => state.loginWindows.find(row => row.key === where.key) ?? null,
+      upsert: async ({ where, create, update }) => {
+        const row = state.loginWindows.find(row => row.key === where.key)
+        if (row) { Object.assign(row, update); return row }
+        const created = { ...create }
+        state.loginWindows.push(created)
+        return created
+      },
+      deleteMany: async ({ where }) => {
+        const before = state.loginWindows.length
+        state.loginWindows = state.loginWindows.filter(row => where.key
+          ? row.key !== where.key
+          : !(row.updatedAt < where.updatedAt.lt && (!row.blockedUntil || row.blockedUntil <= where.OR[1].blockedUntil.lte)))
+        return { count: before - state.loginWindows.length }
+      },
+    },
+    $queryRaw: async () => [{ locked: 1 }],
     user: {
       findUnique: async query => { queries.push(['user.findUnique', plain(query)]); return select(state.users.find(row => matches(row, query.where)), query.select) },
       findFirst: async query => select(state.users.find(row => matches(row, query.where)), query.select),
@@ -369,19 +391,20 @@ test('Blocked accounts cannot sign in and a security-version change invalidates 
   const db = database()
   const { authConfig } = load('src/lib/auth.ts', { prisma: db.prisma })
   const config = authConfig()
-  const original = await config.providers[0].authorize({ email: 'buyer@example.test', password: 'old' })
+  const loginRequest = new Request('http://localhost/api/auth/callback/credentials', { method: 'POST' })
+  const original = await config.providers[0].authorize({ email: 'buyer@example.test', password: 'old' }, loginRequest)
   assert.equal(original.authVersion, 0)
   const token = await config.callbacks.jwt({ token: {}, user: original })
   assert.equal(token.authVersion, 0)
   db.buyer().isActive = false
-  assert.equal(await config.providers[0].authorize({ email: 'buyer@example.test', password: 'old' }), null)
+  assert.equal(await config.providers[0].authorize({ email: 'buyer@example.test', password: 'old' }, loginRequest), null)
   assert.equal(await config.callbacks.jwt({ token }), null)
   db.buyer().isActive = true
   db.buyer().authVersion = 1
   assert.equal(await config.callbacks.jwt({ token }), null)
   assert.equal(await config.callbacks.jwt({ token: { id: 'buyer', lastActivityAt: Date.now() } }), null)
   assert.equal(await config.callbacks.jwt({ token: {}, user: original }), null, 'An authorize response issued before the reset cannot establish a new session')
-  const fresh = await config.providers[0].authorize({ email: 'buyer@example.test', password: 'new' })
+  const fresh = await config.providers[0].authorize({ email: 'buyer@example.test', password: 'new' }, loginRequest)
   assert.ok(await config.callbacks.jwt({ token: {}, user: fresh }))
 })
 
@@ -390,7 +413,8 @@ test('Mobile credentials use the verified login number and establish a session w
   Object.assign(db.buyer(), { email: null, loginPhone: '09123456789', phoneVerifiedAt: '2026-11-06T10:00:00Z', phone: '09123456780' })
   const { authConfig } = load('src/lib/auth.ts', { prisma: db.prisma, bcrypt: { compare: async password => password === 'correct' } })
   const config = authConfig()
-  const authorize = config.providers[0].authorize
+  const authorize = credentials => config.providers[0].authorize(credentials,
+    new Request('http://localhost/api/auth/callback/credentials', { method: 'POST' }))
   assert.equal(await authorize({ loginPhone: '09123456780', password: 'correct' }), null)
   assert.equal(await authorize({ loginPhone: '09123456789', password: 'incorrect' }), null)
   const authorized = await authorize({ loginPhone: '+۹۸ ۹۱۲-۳۴۵-۶۷۸۹', password: 'correct' })
@@ -401,6 +425,21 @@ test('Mobile credentials use the verified login number and establish a session w
   assert.equal(session.user.loginPhone, '09123456789')
   db.buyer().isActive = false
   assert.equal(await authorize({ loginPhone: '09123456789', password: 'correct' }), null)
+})
+
+test('AuthJS forwards the committed login throttle as a safe credentials code without creating a session', async () => {
+  const db = database()
+  const { authConfig } = load('src/lib/auth.ts', { prisma: db.prisma, bcrypt: { compare: async () => false } })
+  const authorize = credentials => authConfig().providers[0].authorize(credentials,
+    new Request('http://localhost/api/auth/callback/credentials', { method: 'POST' }))
+  const credentials = { email: 'buyer@example.test', password: 'incorrect' }
+  for (let i = 0; i < 4; i++) assert.equal(await authorize(credentials), null)
+  await assert.rejects(authorize(credentials), error => /^login_throttled_[1-9]\d{0,3}$/.test(error.code))
+  assert.equal(db.state.loginWindows.filter(row => row.blockedUntil).length, 1)
+  assert.ok(db.state.loginWindows.every(row => row.failures === 5), 'The fifth failure survives the AuthJS exception')
+  const windows = plain(db.state.loginWindows)
+  await assert.rejects(authorize(credentials), error => /^login_throttled_[1-9]\d{0,3}$/.test(error.code))
+  assert.deepEqual(plain(db.state.loginWindows), windows, 'A blocked retry does not extend the deadline or reset counts')
 })
 
 test('Changing your password uses an atomic old-hash check and revokes every session', async () => {

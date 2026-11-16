@@ -39,7 +39,11 @@ export default function LoginPage() {
       })
 
       if (result?.error) {
-        setError('اطلاعات ورود یا رمز عبور اشتباه است.')
+        const retry = /^login_throttled_([1-9]\d{0,3})$/.exec(result.code ?? '')
+        const seconds = retry ? Number(retry[1]) : 0
+        setError(seconds > 0 && seconds <= 3600
+          ? `تعداد تلاش‌های ورود بیش از حد مجاز است. لطفاً ${Math.ceil(seconds / 60).toLocaleString('fa-IR')} دقیقه دیگر دوباره تلاش کنید. برای بازیابی رمز می‌توانید از «فراموشی رمز عبور» استفاده کنید.`
+          : 'اطلاعات ورود یا رمز عبور اشتباه است.')
         return
       }
       if (!result?.ok) {
@@ -73,9 +77,12 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthShell>
-      <h1>خوش آمدی.</h1>
-      <p className={styles.authIntro}>وارد حسابت شو و خریدت رو از همون‌جا ادامه بده.</p>
+    <AuthShell login>
+      <div className={styles.loginHeading}>
+        <h1>خوش آمدید.</h1>
+        <p className={styles.loginSignup}>حساب ندارید؟ <Link href="/register">ایجاد حساب</Link></p>
+      </div>
+      <p className={styles.authIntro}>برای ادامهٔ خرید، وارد حساب خود شوید.</p>
       {error && <div role="alert" className={styles.alert}>{error}</div>}
       <form onSubmit={handleSubmit} className={styles.authForm}>
         <div>
@@ -85,13 +92,12 @@ export default function LoginPage() {
         <div>
           <label htmlFor="login-password">رمز عبور</label>
           <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="input-field" dir="ltr" placeholder="••••••••" required />
+          <Link href="/forgot-password" className={`${styles.loginRecovery} text-sm font-semibold text-brand underline underline-offset-4`}>فراموشی رمز عبور</Link>
         </div>
-        <Link href="/forgot-password" className="text-sm font-semibold text-brand underline underline-offset-4">فراموشی رمز عبور</Link>
         <button type="submit" disabled={loading} className="btn-primary w-full disabled:opacity-50">
           {loading ? 'در حال ورود…' : 'ورود به حساب'}<ArrowLeft size={18} />
         </button>
       </form>
-      <p className={styles.authFooter}>هنوز حساب نداری؟ <Link href="/register">ساخت حساب جدید</Link></p>
     </AuthShell>
   )
 }

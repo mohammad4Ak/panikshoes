@@ -133,6 +133,24 @@ async function enterRegistrationCode(app, destination = 'buyer@example.test') {
   app.fill('register-confirm', 'example-password')
 }
 
+test('Login displays a Persian waiting period for server rate limits and does not read a session', async () => {
+  const app = mount('login', { signInResults: [{ ok: false, error: 'CredentialsSignin', code: 'login_throttled_900' }] })
+  await app.submit()
+  assert.match(text(app.alert()), /۱۵ دقیقه/)
+  assert.match(text(app.alert()), /فراموشی رمز عبور/)
+  assert.equal(app.reads, 0); assert.deepEqual(app.pushes, [])
+  assert.equal(app.button().props.disabled, false)
+})
+
+test('Login never presents untrusted or out-of-range authentication codes as server messages', async () => {
+  for (const code of ['login_throttled_0', 'login_throttled_9999', 'login_throttled_900<script>', 'private-server-error', undefined]) {
+    const app = mount('login', { signInResults: [{ ok: false, error: 'CredentialsSignin', code }] })
+    await app.submit()
+    assert.equal(text(app.alert()), 'اطلاعات ورود یا رمز عبور اشتباه است.')
+    assert.equal(app.reads, 0)
+  }
+})
+
 for (const [role, destination] of [['USER', '/profile'], ['ADMIN', '/admin']]) {
   test(`Login confirms the session and sends ${role} to the correct account page`, async () => {
     const app = mount('login', { sessions: [{ user: { ...userSession.user, role } }] })

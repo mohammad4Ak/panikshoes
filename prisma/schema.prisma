@@ -123,6 +123,27 @@ model PasswordResetRateLimit {
   @@index([windowStartedAt])
 }
 
+model LoginSecuritySettings {
+  id            Int      @id @default(1)
+  version       Int      @default(0)
+  maxAttempts   Int      @default(5)
+  windowMinutes Int      @default(15)
+  lockMinutes   Int      @default(15)
+  ipMaxAttempts Int      @default(30)
+  updatedAt     DateTime @updatedAt
+}
+
+// HMAC keys only; no submitted identifier, password or raw IP is retained.
+model LoginAttemptWindow {
+  key             String   @id
+  windowStartedAt DateTime
+  failures        Int
+  blockedUntil    DateTime?
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
 model Address {
   id        String   @id @default(cuid())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

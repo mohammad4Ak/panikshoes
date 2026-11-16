@@ -1,0 +1,25 @@
+.form { display: grid; gap: 22px; }
+.section { display: grid; gap: 22px; min-width: 0; padding: 26px; border: 1px solid rgb(var(--theme-brand-soft, 229 237 231)); border-radius: 25px; background: white; }
+.section h2 { font-size: 17px; font-weight: 800; }
+.heading { display: flex; gap: 13px; align-items: start; }
+.heading > svg { flex-shrink: 0; margin-top: 4px; color: rgb(var(--theme-brand, 18 102 74)); }
+.heading p, .help, .loading, .explanation { color: rgb(var(--theme-muted, 105 116 110)); font-size: 12px; line-height: 2; }
+.heading p { margin-top: 7px; }
+.savedPolicy { display: grid; gap: 11px; justify-items: start; padding: 18px 20px; border-radius: 18px; background: rgb(var(--theme-surface-soft, 247 249 247)); }
+.savedPolicy p { font-size: 13px; line-height: 2.1; }
+.badge { display: inline-flex; padding: 5px 10px; border-radius: 999px; background: rgb(var(--theme-brand-soft, 235 244 238)); color: rgb(var(--theme-brand, 18 102 74)); font-size: 10px; }
+.limitGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.networkGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 26px; align-items: center; }
+.field { display: grid; align-content: start; gap: 9px; min-width: 0; }
+.field label { min-height: 42px; font-size: 12px; line-height: 1.9; }
+.field small { color: rgb(var(--theme-muted, 105 116 110)); font-size: 11px; line-height: 1.9; }
+.help { display: grid; gap: 10px; }
+.explanation { display: grid; gap: 6px; padding-inline-start: 20px; list-style: disc; }
+.error, .warning, .notice { padding: 15px 18px; border-radius: 17px; margin-bottom: 18px; line-height: 2; font-size: 12px; overflow-wrap: anywhere; }
+.error { background: #fff0ef; color: #9f3029; }
+.warning { background: #fff9e7; color: #805914; margin-bottom: 0; }
+.notice { background: #edf8f0; color: #166534; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.form :is(input, button):focus-visible { outline: 2px solid rgb(var(--theme-brand, 18 102 74)); outline-offset: 3px; }
+@media (max-width: 900px) { .limitGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .networkGrid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .section { padding: 19px; } .limitGrid { grid-template-columns: minmax(0, 1fr); } .field label { min-height: 0; } .actions > button { width: 100%; } }
