@@ -33,7 +33,7 @@ const orderReport = (orders, overrides = {}) => ({
   generatedAt: '2026-10-08T08:00:00.000Z', ...overrides,
 })
 
-function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search = '' } = {}) {
+function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search = '', autoLoad = false } = {}) {
   const slots = [], pendingEffects = [], requests = [], confirmations = [], timers = new Map()
   let nextTimer = 0
   let cursor = 0, tree, stateWrites = 0
@@ -70,6 +70,21 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
   const window = {
     location,
     history: { replaceState(_state, _title, value) { const url = new URL(value, 'http://localhost'); location.search = url.search } },
+  }
+  const scrollTrigger = { id: 'catalog-scroll-trigger' }
+  const observers = []
+  if (autoLoad) {
+    window.IntersectionObserver = class {
+      constructor(callback) {
+        this.callback = callback
+        this.targets = new Set()
+        observers.push(this)
+      }
+      observe(target) { this.targets.add(target) }
+      unobserve(target) { this.targets.delete(target) }
+      disconnect() { this.targets.clear() }
+      notify(isIntersecting) { this.callback([{ target: scrollTrigger, isIntersecting }], this) }
+    }
   }
   const defaults = { '/api/products': [shoe], [catalogEndpoint]: catalogPage([shoe]), '/api/categories': [category], '/api/users': [user], '/api/admin/orders': orderReport([order()]) }
   const fetch = async (url, options = {}) => {
@@ -116,6 +131,7 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
   const { code } = transformSync(source, { loader: 'tsx', format: 'cjs', target: 'es2022', jsx: 'automatic' })
   const context = {
     module: { exports: {} }, AbortController, Error, TypeError, URLSearchParams, fetch, window,
+    IntersectionObserver: window.IntersectionObserver,
     setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id },
     clearTimeout(id) { timers.delete(id) },
     confirm: (message) => { confirmations.push(message); return true },
@@ -125,12 +141,17 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
   function render() {
     cursor = 0
     tree = context.module.exports.default()
+    // React sets DOM refs before the effect that starts observing the trigger.
+    const ref = nodes(tree).find(node => node.props.id === scrollTrigger.id)?.props.ref
+    if (typeof ref === 'function') ref(scrollTrigger)
+    else if (ref) ref.current = scrollTrigger
     pendingEffects.splice(0).forEach((effect) => effect())
     return tree
   }
   render()
   return {
     render, requests, confirmations, location,
+    get scrollObserver() { return observers.findLast(observer => observer.targets.has(scrollTrigger)) },
     flushTimers() { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback() },
     get tree() { return tree }, get stateWrites() { return stateWrites },
     unmount() { for (const slot of slots) slot?.cleanup?.() },
@@ -995,7 +1016,7 @@ test('More products reports the total before all cards load and appends only uni
   assert.match(text(app.tree), /صفحهٔ بعد در دسترس نیست/)
   assert.equal(cards(app).length, 24)
 
-  loadMore(app).props.onClick(); app.render()
+  retry(app).props.onClick(); app.render()
   await settle(); app.render()
   assert.deepEqual(catalogRequests(app).map(requestParams), [
     { cat: 'cat-1', stock: '1', page: '1' },
@@ -1012,13 +1033,14 @@ test('Changing a filter while more products load cancels the old request and rep
   const pending = new Promise((resolve) => { finish = resolve })
   const current = { ...shoe, id: 'matching-stock' }
   const old = { ...shoe, id: 'late-product' }
-  const app = page(undefined, { queues: { [catalogEndpoint]: [
+  const app = page(undefined, { autoLoad: true, queues: { [catalogEndpoint]: [
     response(catalogPage(firstBatch, { total: 25, hasMore: true })),
     () => pending,
     response(catalogPage([current])),
   ] } })
   await settle(); app.render()
-  loadMore(app).props.onClick(); app.render()
+  const oldObserver = app.scrollObserver
+  oldObserver.notify(true); app.render()
   const oldRequest = catalogRequests(app).at(-1)
   assert.deepEqual(requestParams(oldRequest), { page: '2' })
 
@@ -1027,10 +1049,68 @@ test('Changing a filter while more products load cancels the old request and rep
   assert.equal(oldRequest.signal.aborted, true)
   assert.deepEqual(requestParams(catalogRequests(app).at(-1)), { stock: '1', page: '1' })
   assert.deepEqual(cards(app).map((node) => node.props.product.id), [current.id])
+  assert.equal(oldObserver.targets.size, 0)
+  assert.equal(app.scrollObserver, undefined)
 
   finish(response(catalogPage([old], { total: 25, page: 2 })))
+  oldObserver.notify(true)
   await settle(); app.render()
+  assert.equal(catalogRequests(app).length, 3)
   assert.deepEqual(cards(app).map((node) => node.props.product.id), [current.id])
+  app.unmount()
+})
+
+test('Approaching the end requests only one page and stops observing when all products are loaded', async () => {
+  let finish
+  const pending = new Promise(resolve => { finish = resolve })
+  const lastProduct = { ...shoe, id: 'last-product' }
+  const app = page(undefined, { autoLoad: true, queues: { [catalogEndpoint]: [
+    response(catalogPage(firstBatch, { total: 25, hasMore: true })),
+    () => pending,
+  ] } })
+  await settle(); app.render()
+  assert.equal(loadMore(app), undefined)
+  const observer = app.scrollObserver
+  assert.ok(observer)
+  observer.notify(false)
+  assert.equal(catalogRequests(app).length, 1)
+
+  observer.notify(true)
+  observer.notify(true)
+  app.render()
+  assert.deepEqual(catalogRequests(app).map(requestParams), [{ page: '1' }, { page: '2' }])
+  assert.equal(cards(app).length, 24)
+  finish(response(catalogPage([lastProduct], { page: 2, total: 25 })))
+  await settle(); app.render()
+
+  assert.equal(cards(app).at(-1).props.product.id, lastProduct.id)
+  assert.equal(observer.targets.size, 0)
+  assert.equal(app.scrollObserver, undefined)
+  app.unmount()
+})
+
+test('A failed automatic request pauses scrolling pagination until an explicit retry', async () => {
+  const lastProduct = { ...shoe, id: 'retry-product' }
+  const app = page(undefined, { autoLoad: true, queues: { [catalogEndpoint]: [
+    response(catalogPage(firstBatch, { total: 25, hasMore: true })),
+    response({ error: 'صفحهٔ بعد در دسترس نیست' }, 503),
+    response(catalogPage([lastProduct], { page: 2, total: 25 })),
+  ] } })
+  await settle(); app.render()
+  const observer = app.scrollObserver
+  observer.notify(true)
+  await settle(); app.render()
+  assert.equal(app.scrollObserver, undefined)
+  assert.match(text(app.tree), /صفحهٔ بعد در دسترس نیست/)
+  assert.equal(cards(app).length, 24)
+  observer.notify(true)
+  await settle(); app.render()
+  assert.equal(catalogRequests(app).length, 2)
+
+  retry(app).props.onClick(); app.render()
+  await settle(); app.render()
+  assert.deepEqual(catalogRequests(app).map(requestParams), [{ page: '1' }, { page: '2' }, { page: '2' }])
+  assert.equal(cards(app).at(-1).props.product.id, lastProduct.id)
   app.unmount()
 })
 

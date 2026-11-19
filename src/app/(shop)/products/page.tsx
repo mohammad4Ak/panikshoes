@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { X, ArrowUpDown, Search, SlidersHorizontal } from 'lucide-react'
@@ -142,6 +142,7 @@ function ProductsContent() {
   const [categories, setCategories] = useState<Category[]>([])
   const categoryCache = useRef<Category[] | null>(null)
   const request = useRef<CatalogRequest | null>(null)
+  const scrollTrigger = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<CatalogView | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [priceRevision, setPriceRevision] = useState(0)
@@ -161,6 +162,8 @@ function ProductsContent() {
   const loadError = current?.phase === 'error' ? current.message : ''
   const refreshing = result !== null && current?.priceRevision !== priceRevision
   const loadingMore = current?.phase === 'loading-more'
+  const supportsAutoLoad = typeof IntersectionObserver === 'function'
+  const canAutoLoad = supportsAutoLoad && result?.hasMore === true && current?.phase === 'ready' && !refreshing
   const listingChanged = result !== null && !result.hasMore
     && (result.items.length !== result.total || (result.page > 1 && result.lastPageEmpty))
   const refreshAt = refreshing || current?.phase === 'refresh-error' ? null : result?.refreshAt
@@ -244,7 +247,7 @@ function ProductsContent() {
     return () => clearTimeout(timer)
   }, [refreshAt])
 
-  async function loadMore() {
+  const loadMore = useCallback(async function () {
     const scope = request.current
     if (!result?.hasMore || refreshing || current?.phase === 'refresh-error' || !scope || scope.pending) return
     if (scope.result !== result || scope.key !== requestKey || scope.priceRevision !== priceRevision) return
@@ -271,7 +274,28 @@ function ProductsContent() {
       scope.pending = false
       setView({ key: requestKey, priceRevision, result, phase: 'more-error', message: catalogError(cause) })
     }
-  }
+  }, [result, refreshing, current?.phase, requestKey, priceRevision, filterQuery])
+
+  useEffect(() => {
+    const target = scrollTrigger.current
+    if (!canAutoLoad || !target) return
+
+    let listening = true
+    const observer = new IntersectionObserver(entries => {
+      if (!listening || !entries.some(entry => entry.isIntersecting)) return
+      // Each rendered page may trigger only one read, even if the observer
+      // queues another callback before the request state reaches React.
+      listening = false
+      observer.disconnect()
+      void loadMore()
+    }, { rootMargin: '0px 0px 200px 0px' })
+
+    observer.observe(target)
+    return () => {
+      listening = false
+      observer.disconnect()
+    }
+  }, [canAutoLoad, loadMore])
 
   const activeCategoryName = categories.find((c) => c.id === activeCat)?.name
 
@@ -446,7 +470,11 @@ function ProductsContent() {
         {result && (result.hasMore || result.page > 1 || listingChanged || current?.phase === 'refresh-error') && (
           <div className={catalogStyles.pagination}>
             {!listingChanged && (result.hasMore || result.page > 1) && (
-              <p role="status">نمایش {catalogNumber.format(result.items.length)} از {catalogNumber.format(result.total)} مدل</p>
+              <p role="status">
+                {supportsAutoLoad && loadingMore
+                  ? 'در حال دریافت محصولات...'
+                  : `نمایش ${catalogNumber.format(result.items.length)} از ${catalogNumber.format(result.total)} مدل`}
+              </p>
             )}
             {current?.phase === 'refresh-error' ? (
               <>
@@ -458,13 +486,16 @@ function ProductsContent() {
             ) : result.hasMore && (
               <>
                 {current?.phase === 'more-error' && <p className={catalogStyles.paginationError} role="alert">{current.message}</p>}
-                <button type="button" className="btn-outline" aria-controls="catalog-products" aria-disabled={loadingMore || refreshing} onClick={() => void loadMore()}>
-                  {loadingMore ? 'در حال دریافت محصولات...' : 'نمایش محصولات بیشتر'}
-                </button>
+                {(!supportsAutoLoad || current?.phase === 'more-error') && (
+                  <button type="button" className="btn-outline" aria-controls="catalog-products" aria-disabled={loadingMore || refreshing} onClick={() => void loadMore()}>
+                    {loadingMore ? 'در حال دریافت محصولات...' : current?.phase === 'more-error' ? 'تلاش دوباره' : 'نمایش محصولات بیشتر'}
+                  </button>
+                )}
               </>
             )}
           </div>
         )}
+        {canAutoLoad && <div id="catalog-scroll-trigger" ref={scrollTrigger} className={catalogStyles.scrollTrigger} aria-hidden="true" />}
       </div>
     </div>
   )
