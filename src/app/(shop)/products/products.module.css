@@ -26,6 +26,21 @@
   line-height: 2;
 }
 
+.pagination {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  margin: 28px 0 4px;
+  text-align: center;
+  color: rgb(var(--theme-muted, 105 116 110));
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.pagination button { min-height: 44px; max-width: 100%; }
+.pagination button[aria-disabled='true'] { cursor: wait; opacity: .65; }
+.paginationError { color: #a23530; }
+
 @media (max-width: 700px) {
   .heading {
     flex-direction: column;

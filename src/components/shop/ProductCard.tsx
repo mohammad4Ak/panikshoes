@@ -31,12 +31,13 @@ interface Product {
 interface ProductCardProps {
   product: Product
   revealDelay?: 0 | 1 | 2 | 3
+  pricingAt?: number
 }
 
-export default function ProductCard({ product, revealDelay = 0 }: ProductCardProps) {
+export default function ProductCard({ product, revealDelay = 0, pricingAt }: ProductCardProps) {
   const outOfStock = product.inventoryConfigured !== true || product.stock !== undefined && product.stock <= 0
   const href = `/products/${encodeURIComponent(product.slug)}`
-  const pricing = productPricing(product)
+  const pricing = productPricing(product, pricingAt === undefined ? undefined : new Date(pricingAt))
 
   return (
     <article className={styles.product} data-reveal data-reveal-delay={revealDelay}>

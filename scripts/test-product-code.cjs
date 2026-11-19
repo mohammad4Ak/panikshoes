@@ -16,6 +16,7 @@ const request = body => new Request('http://localhost/api/products', {
 function load(file, { session = admin, prisma = {} } = {}) {
   const cache = new Map()
   const dependencies = {
+    '@prisma/client': require('@prisma/client'),
     'next/server': { NextResponse: Response },
     '@/lib/auth': { auth: async () => session },
     '@/lib/prisma': { prisma },
@@ -194,4 +195,42 @@ test('Catalog code search normalizes digits/case and treats identifier underscor
   assert.equal(code.contains, 'SKU\\_00622'); assert.equal(code.mode, 'insensitive')
   assert.equal(query.where.categoryId, 'cat')
   assert.equal(query.where.OR.find(condition => condition.name).name.contains, 'sku_۰۰۶۲۲')
+})
+
+test('Header suggestions cap the database result at six and return only public summary fields with effective prices', async () => {
+  const rows = [
+    { id: 'sale', slug: 'on-sale', name: 'کفش تخفیف‌دار', image: '/sale.png', categoryName: 'کتانی', price: 100, salePrice: 60, saleStartsAt: null, saleEndsAt: null },
+    { id: 'expired', slug: 'expired-sale', name: 'کفش', image: null, categoryName: 'کتانی', price: 200, salePrice: 130, saleStartsAt: null, saleEndsAt: new Date('2000-01-01Z') },
+  ]
+  const prisma = {
+    async $queryRaw(strings, ...values) {
+      assert.match(strings.join(''), /ORDER BY p\."createdAt" DESC, p\."id" ASC\s+LIMIT 6\b/)
+      assert.equal(strings.join('').includes('SKU'), false)
+      assert.ok(values.some(value => value.values?.some(part => typeof part === 'string' && part.includes('00622'))))
+      return rows
+    },
+  }
+  const suggestions = load('src/app/api/catalog/suggestions/route.ts', { prisma, session: null })
+  const response = await suggestions.GET(new Request('http://localhost/api/catalog/suggestions?q=SKU_۰۰۶۲۲'))
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('Cache-Control'), 'no-store')
+  assert.deepEqual(await response.json(), rows.map(({ id, slug, name, image, categoryName }, index) => ({
+    id, slug, name, image, categoryName, effectivePrice: index === 0 ? 60 : 200,
+  })))
+})
+
+test('Header suggestions avoid database work for short or invalid search input', async () => {
+  let queryCount = 0
+  const prisma = { $queryRaw: async () => { queryCount++; return [] } }
+  const suggestions = load('src/app/api/catalog/suggestions/route.ts', { prisma, session: null })
+  for (const input of ['', ' ش ']) {
+    const response = await suggestions.GET(new Request(`http://localhost/api/catalog/suggestions?q=${encodeURIComponent(input)}`))
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), [])
+  }
+  for (const input of ['a'.repeat(201), 'کفش\0']) {
+    const response = await suggestions.GET(new Request(`http://localhost/api/catalog/suggestions?q=${encodeURIComponent(input)}`))
+    assert.equal(response.status, 400)
+  }
+  assert.equal(queryCount, 0)
 })

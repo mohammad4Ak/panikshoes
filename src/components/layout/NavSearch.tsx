@@ -11,19 +11,20 @@ interface SearchResult {
   id: string
   name: string
   slug: string
-  price: number
-  images: string[]
-  category: { name: string }
+  effectivePrice: number
+  image: string | null
+  categoryName: string
 }
 
 export default function NavSearch({ onClose }: { onClose: () => void }) {
   const [term, setTerm] = useState('')
-  const [response, setResponse] = useState<{ query: string; items: SearchResult[] }>({ query: '', items: [] })
+  const [response, setResponse] = useState<{ query: string; items: SearchResult[]; failed?: boolean }>({ query: '', items: [] })
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const query = term.trim()
   const loading = query.length >= 2 && response.query !== query
   const results = query.length >= 2 && response.query === query ? response.items : []
+  const failed = query.length >= 2 && response.query === query && response.failed
 
   // فوکوس خودکار + بستن با Escape
   useEffect(() => {
@@ -45,13 +46,15 @@ export default function NavSearch({ onClose }: { onClose: () => void }) {
 
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      fetch(`/api/products?q=${encodeURIComponent(query)}`, { signal: controller.signal })
-        .then(async (r) => (r.ok ? r.json() : []))
-        .then((data: SearchResult[]) => {
-          if (!controller.signal.aborted) setResponse({ query, items: data.slice(0, 6) })
+      fetch(`/api/catalog/suggestions?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+        .then(async (r) => {
+          if (!r.ok) throw new Error('Search request failed')
+          const items: SearchResult[] = await r.json()
+          if (!Array.isArray(items)) throw new Error('Invalid search response')
+          if (!controller.signal.aborted) setResponse({ query, items })
         })
         .catch(() => {
-          if (!controller.signal.aborted) setResponse({ query, items: [] })
+          if (!controller.signal.aborted) setResponse({ query, items: [], failed: true })
         })
     }, 250)
 
@@ -94,6 +97,7 @@ export default function NavSearch({ onClose }: { onClose: () => void }) {
             <input
               ref={inputRef}
               type="text"
+              maxLength={200}
               aria-label="جستجو در محصولات"
               value={term}
               onChange={(e) => setTerm(e.target.value)}
@@ -111,7 +115,9 @@ export default function NavSearch({ onClose }: { onClose: () => void }) {
               <p role="status" className="px-5 py-6 text-sm text-mist">در حال جستجو...</p>
             )}
 
-            {!loading && term.trim().length >= 2 && results.length === 0 && (
+            {failed && <p role="status" className="px-5 py-6 text-sm text-mist">جست‌وجو انجام نشد. می‌توانی همهٔ نتایج را در صفحهٔ محصولات ببینی.</p>}
+
+            {!loading && !failed && query.length >= 2 && results.length === 0 && (
               <p className="px-5 py-6 text-sm text-mist">
                 محصولی برای «{term}» پیدا نشد
               </p>
@@ -124,12 +130,12 @@ export default function NavSearch({ onClose }: { onClose: () => void }) {
                   onClick={() => goProduct(product.slug)}
                   className="w-full flex items-center gap-4 px-5 md:px-7 py-3 hover:bg-brand-soft/70 transition-colors text-right"
                 >
-                  {product.images[0] ? <Image
-                    src={product.images[0]}
+                  {product.image ? <Image
+                    src={product.image}
                     alt=""
                     width={64}
                     height={64}
-                    unoptimized={product.images[0].startsWith('http') || product.images[0].startsWith('/api/')}
+                    unoptimized={product.image.startsWith('http') || product.image.startsWith('/api/')}
                     className="w-16 h-16 rounded-2xl object-cover shrink-0 bg-fog"
                   /> : <span className="grid place-items-center w-16 h-16 rounded-2xl bg-fog shrink-0"><ShoppingBag aria-hidden="true" className="w-6 h-6 text-mist" /></span>}
                   <span className="flex-1 min-w-0">
@@ -137,10 +143,10 @@ export default function NavSearch({ onClose }: { onClose: () => void }) {
                       {product.name}
                     </span>
                     <span className="block text-xs text-mist mt-1">
-                      {product.category?.name}
+                      {product.categoryName}
                     </span>
                     <span className="block text-brand font-bold text-xs mt-2">
-                      {formatPrice(product.price)}
+                      {formatPrice(product.effectivePrice)}
                     </span>
                   </span>
                   <ArrowLeft className="w-4 h-4 text-mist shrink-0" aria-hidden="true" />

@@ -22,6 +22,7 @@
     "test:account-catalog": "node --test scripts/test-account-catalog.cjs",
     "test:orders-business": "node --test scripts/test-orders-business.cjs",
     "test:catalog-ui": "node --test scripts/test-catalog-ui.cjs",
+    "test:catalog:db": "node --env-file=.env scripts/test-public-catalog-db.cjs",
     "test:product-prices": "node --test scripts/test-product-price-bulk.cjs scripts/test-product-price-bulk-ui.cjs",
     "test:product-prices:db": "node --env-file=.env scripts/test-product-price-bulk-db.cjs",
     "test:session-activity": "node --test scripts/test-session-activity.cjs",

@@ -22,6 +22,11 @@ const user = { id: 'user-1', name: 'مشتری نمونه', email: 'customer@exa
 const order = (overrides = {}) => ({ id: 'order-pending', total: 150000, shippingMethodName: 'پست پیشتاز', shippingCost: 50000, status: 'PENDING', verified: false, recipientName: 'گیرنده نمونه', address: 'نشانی نمونه', phone: '09123456789', createdAt: '2026-10-01T08:00:00Z', user: { name: user.name, email: user.email }, items: [{ id: 'line-1', quantity: 1, size: 42, color: 'سبز', price: 100000, product: { name: shoe.name } }], ...overrides })
 const settle = () => new Promise(setImmediate)
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data })
+const catalogEndpoint = '/api/catalog/products'
+const catalogPage = (items, overrides = {}) => ({
+  items, total: items.length, page: 1, hasMore: false, nextPriceChangeAt: null,
+  pricedAt: new Date().toISOString(), ...overrides,
+})
 const orderReport = (orders, overrides = {}) => ({
   orders, pagination: { page: 1, pageSize: 20, total: orders.length, pages: 1 },
   dashboard: { date: '2026-10-08', timeZone: 'Asia/Tehran', todayOrders: orders.length, todayPaidOrders: 0, todayPaidTotal: 0, awaitingReview: 0, readyToShip: 0 },
@@ -66,7 +71,7 @@ function page(file = 'src/app/(shop)/products/page.tsx', { queues = {}, search =
     location,
     history: { replaceState(_state, _title, value) { const url = new URL(value, 'http://localhost'); location.search = url.search } },
   }
-  const defaults = { '/api/products': [shoe], '/api/categories': [category], '/api/users': [user], '/api/admin/orders': orderReport([order()]) }
+  const defaults = { '/api/products': [shoe], [catalogEndpoint]: catalogPage([shoe]), '/api/categories': [category], '/api/users': [user], '/api/admin/orders': orderReport([order()]) }
   const fetch = async (url, options = {}) => {
     const key = `${options.method || 'GET'} ${url}`
     requests.push({ url, ...options })
@@ -145,6 +150,9 @@ function text(tree) {
 const find = (app, predicate) => nodes(app.tree).find(predicate)
 const retry = (app) => find(app, (node) => node.type === 'button' && text(node) === 'تلاش دوباره')
 const cards = (app) => nodes(app.tree).filter((node) => node.type === 'ProductCard')
+const loadMore = (app) => find(app, (node) => node.type === 'button' && text(node).includes('نمایش محصولات بیشتر'))
+const catalogRequests = (app) => app.requests.filter((request) => request.url.split('?')[0] === catalogEndpoint)
+const requestParams = (request) => Object.fromEntries(new URL(request.url, 'http://localhost').searchParams)
 
 test('Order printing shares selection with status tools, carries complete filters, and locks stale page handlers', async () => {
   const app = page('src/app/admin/orders/page.tsx')
@@ -387,15 +395,14 @@ test('Admin size input accepts Persian, Arabic and Latin digits with either comm
   app.unmount()
 })
 
-for (const search of ['کفش', 'ADIDAS-ULTRA', ' TRAIL ', 'lightweight']) {
-  test(`Listing search includes names, slugs and descriptions with trimmed case-insensitive terms: ${search}`, async () => {
-    const app = page(undefined, { search: `?q=${encodeURIComponent(search)}` })
-    await settle(); app.render()
-    assert.equal(cards(app).length, 1)
-    assert.equal(cards(app)[0].props.product.id, shoe.id)
-    app.unmount()
-  })
-}
+test('Listing keeps results found by the server even when the query matches only an internal product code', async () => {
+  const app = page(undefined, { search: '?q=' + encodeURIComponent(' ۰۰۶۲۲ ') })
+  await settle(); app.render()
+  assert.deepEqual(requestParams(catalogRequests(app)[0]), { q: '۰۰۶۲۲', page: '1' })
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), [shoe.id])
+  assert.ok(!app.requests.some((request) => request.url === '/api/products'))
+  app.unmount()
+})
 
 for (const [label, failure] of [
   ['network failure', new TypeError('Failed to fetch')],
@@ -403,7 +410,7 @@ for (const [label, failure] of [
   ['invalid JSON data', response({ unexpected: true })],
 ]) {
   test(`Listing ${label} displays an error and retries while preserving URL filters`, async () => {
-    const app = page(undefined, { search: '?q=TRAIL&stock=1', queues: { '/api/products': [failure, response([shoe])] } })
+    const app = page(undefined, { search: '?q=TRAIL&stock=1', queues: { [catalogEndpoint]: [failure, response(catalogPage([shoe]))] } })
     await settle(); app.render()
     assert.match(text(app.tree), /ویترین فعلاً در دسترس نیست/)
     assert.ok(find(app, (node) => node.props.role === 'alert'))
@@ -413,6 +420,10 @@ for (const [label, failure] of [
     await settle(); app.render()
     assert.equal(cards(app).length, 1)
     assert.equal(app.location.search, '?q=TRAIL&stock=1')
+    assert.deepEqual(catalogRequests(app).map(requestParams), [
+      { q: 'TRAIL', stock: '1', page: '1' },
+      { q: 'TRAIL', stock: '1', page: '1' },
+    ])
     app.unmount()
   })
 }
@@ -428,14 +439,15 @@ test('Category failure is visible instead of pretending the store has no product
 
 for (const file of ['src/app/(shop)/products/page.tsx', 'src/app/admin/products/page.tsx', 'src/app/admin/categories/page.tsx', 'src/app/admin/users/page.tsx']) {
   test(`${file} aborts pending loading and ignores late responses after unmount`, async () => {
-    const endpoint = file.includes('categories') ? '/api/categories' : file.includes('users') ? '/api/users' : '/api/products'
+    const endpoint = file.includes('(shop)') ? catalogEndpoint : file.includes('categories') ? '/api/categories' : file.includes('users') ? '/api/users' : '/api/products'
     let finish
     const delayed = new Promise((resolve) => { finish = resolve })
     const app = page(file, { queues: { [endpoint]: [() => delayed] } })
     const writes = app.stateWrites
     app.unmount()
     assert.ok(app.requests.every((request) => request.signal.aborted))
-    finish(response(endpoint === '/api/users' ? [user] : endpoint === '/api/categories' ? [category] : [shoe]))
+    const data = endpoint === catalogEndpoint ? catalogPage([shoe]) : endpoint === '/api/users' ? [user] : endpoint === '/api/categories' ? [category] : [shoe]
+    finish(response(data))
     await settle()
     assert.equal(app.stateWrites, writes)
   })
@@ -853,9 +865,11 @@ for (const [sort, expected] of [
   ['popular', ['highest-rated', 'more-reviews', 'stable-rated-tie', 'latest', 'most-viewed', 'no-feedback']],
   ['views', ['most-viewed', 'more-reviews', 'stable-rated-tie', 'highest-rated', 'latest', 'no-feedback']],
 ]) {
-  test('Catalog supports bookmarked ' + sort + ' sorting, stable ties and approved rating values on cards', async () => {
-    const app = page(undefined, { search: '?sort=' + sort + '&stock=1', queues: { '/api/products': [response(sortedProducts)] } })
+  test('Catalog sends bookmarked ' + sort + ' sorting and preserves the server order and rating values', async () => {
+    const rows = expected.map((id) => sortedProducts.find((product) => product.id === id))
+    const app = page(undefined, { search: '?sort=' + sort + '&stock=1', queues: { [catalogEndpoint]: [response(catalogPage(rows))] } })
     await settle(); app.render()
+    assert.deepEqual(requestParams(catalogRequests(app)[0]), { sort, stock: '1', page: '1' })
     assert.deepEqual(cards(app).map((node) => node.props.product.id), expected)
     assert.equal(sortSelect(app).props.value, sort)
     assert.equal(cards(app)[0].props.product.ratingAverage, sortedProducts.find((product) => product.id === expected[0]).ratingAverage)
@@ -866,22 +880,33 @@ for (const [sort, expected] of [
   })
 }
 
-test('Changing sort preserves other URL filters and returning to newest restores API order', async () => {
-  const app = page(undefined, { search: '?cat=cat-1&q=TRAIL&min=1&max=500000&stock=1', queues: { '/api/products': [response(sortedProducts)] } })
+test('Changing sort preserves other URL filters and requests newest results again when reset', async () => {
+  const popular = [sortedProducts[2], sortedProducts[0]]
+  const app = page(undefined, { search: '?cat=cat-1&q=TRAIL&min=1&max=500000&stock=1', queues: { [catalogEndpoint]: [
+    response(catalogPage(sortedProducts)), response(catalogPage(popular)), response(catalogPage(sortedProducts)),
+  ] } })
   await settle(); app.render()
   sortSelect(app).props.onChange({ target: { value: 'popular' } }); app.render()
+  await settle(); app.render()
   const changed = new URLSearchParams(app.location.search)
   assert.equal(changed.get('sort'), 'popular')
-  for (const [key, value] of [['cat', 'cat-1'], ['q', 'TRAIL'], ['min', '1'], ['max', '500000'], ['stock', '1']]) assert.equal(changed.get(key), value)
+  const filters = { cat: 'cat-1', q: 'TRAIL', min: '1', max: '500000', stock: '1' }
+  for (const [key, value] of Object.entries(filters)) assert.equal(changed.get(key), value)
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), popular.map((product) => product.id))
   sortSelect(app).props.onChange({ target: { value: 'newest' } }); app.render()
+  await settle(); app.render()
   assert.equal(new URLSearchParams(app.location.search).has('sort'), false)
   assert.deepEqual(cards(app).map((node) => node.props.product.id), sortedProducts.map((product) => product.id))
-  assert.equal(app.requests.length, 2)
+  assert.deepEqual(catalogRequests(app).map(requestParams), [
+    { ...filters, page: '1' },
+    { ...filters, sort: 'popular', page: '1' },
+    { ...filters, page: '1' },
+  ])
   app.unmount()
 })
 
 test('Legacy catalog products without metrics retain their order and display zero feedback', async () => {
-  const app = page(undefined, { search: '?sort=popular', queues: { '/api/products': [response([{ ...shoe, id: 'legacy-first' }, { ...shoe, id: 'legacy-second' }])] } })
+  const app = page(undefined, { search: '?sort=popular', queues: { [catalogEndpoint]: [response(catalogPage([{ ...shoe, id: 'legacy-first' }, { ...shoe, id: 'legacy-second' }]))] } })
   await settle(); app.render()
   assert.deepEqual(cards(app).map((node) => node.props.product.id), ['legacy-first', 'legacy-second'])
   assert.equal(cards(app)[0].props.product.ratingAverage, 0)
@@ -889,29 +914,124 @@ test('Legacy catalog products without metrics retain their order and display zer
   app.unmount()
 })
 
-test('Catalog price sorting and ranges use active sale prices, while scheduled and expired sales keep base prices', async () => {
-  const products = [
-    { ...shoe, id: 'active', price: 300000, salePrice: 50000 },
-    { ...shoe, id: 'regular', price: 100000 },
-    { ...shoe, id: 'future', price: 200000, salePrice: 10000, saleStartsAt: '2099-01-01T00:00:00Z' },
-    { ...shoe, id: 'expired', price: 400000, salePrice: 10000, saleEndsAt: '2000-01-01T00:00:00Z' },
-  ]
-  for (const [search, expected] of [
-    ['?sort=cheap', ['active', 'regular', 'future', 'expired']],
-    ['?sort=expensive', ['expired', 'future', 'regular', 'active']],
-    ['?min=40000&max=60000', ['active']],
-    ['?min=150000&max=250000', ['future']],
-  ]) {
-    const app = page(undefined, { search, queues: { '/api/products': [response(products)] } })
-    await settle(); app.render()
-    assert.deepEqual(cards(app).map(node => node.props.product.id), expected)
-    if (expected.includes('active')) {
-      const active = cards(app).find(node => node.props.product.id === 'active').props.product
-      assert.equal(active.price, 300000, 'Base prices are never replaced by the effective selling price')
-      assert.equal(active.salePrice, 50000)
-    }
-    app.unmount()
-  }
+test('Server-filtered sale results preserve the original price for the product card', async () => {
+  const active = { ...shoe, id: 'active', price: 300000, salePrice: 50000 }
+  const app = page(undefined, {
+    search: '?sort=cheap&min=40000&max=60000',
+    queues: { [catalogEndpoint]: [response(catalogPage([active]))] },
+  })
+  await settle(); app.render()
+  assert.deepEqual(requestParams(catalogRequests(app)[0]), { sort: 'cheap', min: '40000', max: '60000', page: '1' })
+  assert.equal(cards(app).length, 1)
+  assert.equal(cards(app)[0].props.product.price, 300000)
+  assert.equal(cards(app)[0].props.product.salePrice, 50000)
+  app.unmount()
+})
+
+test('Opening a sale can refresh an empty price-filtered listing and bring in a newly matching product', async () => {
+  const onSale = { ...shoe, id: 'on-sale', price: 300000, salePrice: 50000 }
+  const now = Date.now()
+  const app = page(undefined, {
+    search: '?min=40000&max=60000',
+    queues: { [catalogEndpoint]: [
+      response(catalogPage([], {
+        pricedAt: new Date(now).toISOString(),
+        nextPriceChangeAt: new Date(now + 60000).toISOString(),
+      })),
+      response(catalogPage([onSale])),
+    ] },
+  })
+  await settle(); app.render()
+  assert.equal(cards(app).length, 0)
+  assert.equal(catalogRequests(app).length, 1)
+
+  app.flushTimers(); app.render(); await settle(); app.render()
+  assert.deepEqual(catalogRequests(app).map(requestParams), [
+    { min: '40000', max: '60000', page: '1' },
+    { min: '40000', max: '60000', page: '1' },
+  ])
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), [onSale.id])
+  app.unmount()
+})
+
+test('Listing debounces typing and renders a dedicated empty result state for unmatched searches', async () => {
+  const app = page(undefined, {
+    queues: { [catalogEndpoint]: [response(catalogPage([shoe])), response(catalogPage([]))] },
+  })
+  await settle(); app.render()
+  const search = () => find(app, (node) => node.props['aria-label'] === 'جستجوی محصولات')
+  search().props.onChange({ target: { value: 'کفش' } }); app.render()
+  search().props.onChange({ target: { value: 'کتانی' } }); app.render()
+  assert.equal(catalogRequests(app).length, 1)
+  app.flushTimers(); app.render(); await settle(); app.render()
+  assert.deepEqual(catalogRequests(app).map(requestParams), [{ page: '1' }, { q: 'کتانی', page: '1' }])
+  assert.equal(search().props.value, 'کتانی')
+  assert.equal(cards(app).length, 0)
+  assert.match(text(app.tree), /این ترکیب، نتیجه‌ای نداشت/)
+  assert.doesNotMatch(text(app.tree), /هنوز محصولی ثبت نشده است/)
+  app.unmount()
+})
+
+const firstBatch = Array.from({ length: 24 }, (_, index) => ({ ...shoe, id: `first-${index}` }))
+
+test('More products reports the total before all cards load and appends only unique products after retry', async () => {
+  const moreProducts = [{ ...shoe, id: 'new-first' }, { ...shoe, id: 'new-second' }]
+  const app = page(undefined, {
+    search: '?cat=cat-1&stock=1',
+    queues: { [catalogEndpoint]: [
+      response(catalogPage(firstBatch, { total: 26, hasMore: true })),
+      response({ error: 'صفحهٔ بعد در دسترس نیست' }, 503),
+      response(catalogPage([firstBatch.at(-1), ...moreProducts], { total: 26, page: 2 })),
+    ] },
+  })
+  await settle(); app.render()
+  assert.equal(cards(app).length, 24)
+  assert.match(text(app.tree), /۲۶ مدل/)
+
+  const clickMore = loadMore(app).props.onClick
+  clickMore(); clickMore(); app.render()
+  await settle(); app.render()
+  assert.equal(catalogRequests(app).length, 2, 'Repeated clicks must not request the same page twice')
+  assert.match(text(app.tree), /صفحهٔ بعد در دسترس نیست/)
+  assert.equal(cards(app).length, 24)
+
+  loadMore(app).props.onClick(); app.render()
+  await settle(); app.render()
+  assert.deepEqual(catalogRequests(app).map(requestParams), [
+    { cat: 'cat-1', stock: '1', page: '1' },
+    { cat: 'cat-1', stock: '1', page: '2' },
+    { cat: 'cat-1', stock: '1', page: '2' },
+  ])
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), [...firstBatch, ...moreProducts].map(({ id }) => id))
+  assert.ok(!loadMore(app))
+  app.unmount()
+})
+
+test('Changing a filter while more products load cancels the old request and replaces cards from page one', async () => {
+  let finish
+  const pending = new Promise((resolve) => { finish = resolve })
+  const current = { ...shoe, id: 'matching-stock' }
+  const old = { ...shoe, id: 'late-product' }
+  const app = page(undefined, { queues: { [catalogEndpoint]: [
+    response(catalogPage(firstBatch, { total: 25, hasMore: true })),
+    () => pending,
+    response(catalogPage([current])),
+  ] } })
+  await settle(); app.render()
+  loadMore(app).props.onClick(); app.render()
+  const oldRequest = catalogRequests(app).at(-1)
+  assert.deepEqual(requestParams(oldRequest), { page: '2' })
+
+  find(app, (node) => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } })
+  app.render(); await settle(); app.render()
+  assert.equal(oldRequest.signal.aborted, true)
+  assert.deepEqual(requestParams(catalogRequests(app).at(-1)), { stock: '1', page: '1' })
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), [current.id])
+
+  finish(response(catalogPage([old], { total: 25, page: 2 })))
+  await settle(); app.render()
+  assert.deepEqual(cards(app).map((node) => node.props.product.id), [current.id])
+  app.unmount()
 })
 
 test('Admin loads scheduled discounts in local time, serializes UTC dates and can explicitly clear the sale', async () => {
