@@ -12,6 +12,7 @@ const sortColumns = {
   expensive: Prisma.sql`r."effectivePrice" DESC,`,
   popular: Prisma.sql`r."ratingAverage" DESC, r."ratingCount" DESC,`,
   views: Prisma.sql`r."viewCount" DESC, r."ratingAverage" DESC, r."ratingCount" DESC,`,
+  bestselling: Prisma.sql`r."unitsSold" DESC,`,
 }
 
 type CatalogRow = { total: bigint; nextPriceChangeAt: Date | null } & ({
@@ -68,6 +69,19 @@ export async function readPublicCatalog(params: URLSearchParams, now = new Date(
   const order = Prisma.sql`${Object.hasOwn(sortColumns, sort) ? sortColumns[sort as keyof typeof sortColumns] : Prisma.empty}
     r."createdAt" DESC, r."id" ASC`
   const rankByRatings = sort === 'popular' || sort === 'views'
+  const rankBySales = sort === 'bestselling'
+
+  // Match the paid class in sales-report: verified orders except cancellations.
+  const salesRanking = rankBySales ? Prisma.sql`
+    LEFT JOIN (
+      SELECT item."productId", SUM(item."quantity") AS "unitsSold"
+      FROM matching eligible
+      JOIN "OrderItem" item ON item."productId" = eligible."id"
+      JOIN "Order" purchase ON purchase."id" = item."orderId"
+      WHERE purchase."verified" = TRUE AND purchase."status" <> 'CANCELLED'
+      GROUP BY item."productId"
+    ) sales ON sales."productId" = m."id"
+  ` : Prisma.empty
 
   // Sort on the catalog's effective price at one instant, using the same
   // inclusive start and exclusive end as productPricing in the card/checkout.
@@ -96,8 +110,12 @@ export async function readPublicCatalog(params: URLSearchParams, now = new Date(
         ${min === null ? Prisma.empty : Prisma.sql`AND c."effectivePrice" >= ${min}`}
         ${max === null ? Prisma.empty : Prisma.sql`AND c."effectivePrice" <= ${max}`}
     ), ranked AS (
-      SELECT m.* ${rankByRatings ? Prisma.sql`, ratings."ratingAverage", ratings."ratingCount"` : Prisma.empty}
-      FROM matching m ${rankByRatings ? approvedRatings(Prisma.sql`m."id"`) : Prisma.empty}
+      SELECT m.*
+        ${rankByRatings ? Prisma.sql`, ratings."ratingAverage", ratings."ratingCount"` : Prisma.empty}
+        ${rankBySales ? Prisma.sql`, COALESCE(sales."unitsSold", 0) AS "unitsSold"` : Prisma.empty}
+      FROM matching m
+      ${rankByRatings ? approvedRatings(Prisma.sql`m."id"`) : Prisma.empty}
+      ${salesRanking}
     ), selected AS (
       SELECT r.* FROM ranked r
       ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${(page - 1) * PAGE_SIZE}

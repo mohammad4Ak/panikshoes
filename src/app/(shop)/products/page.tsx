@@ -34,7 +34,7 @@ interface Category {
   name: string
 }
 
-type SortKey = 'newest' | 'cheap' | 'expensive' | 'popular' | 'views'
+type SortKey = 'newest' | 'cheap' | 'expensive' | 'bestselling' | 'popular' | 'views'
 type FilterParam = 'cat' | 'q' | 'sort' | 'min' | 'max' | 'stock'
 
 type CatalogPage = {
@@ -150,7 +150,8 @@ function ProductsContent() {
   const activeCat = searchParams.get('cat')?.trim() || 'ALL'
   const query = searchParams.get('q') ?? ''
   const sortParam = searchParams.get('sort')
-  const sort: SortKey = sortParam === 'cheap' || sortParam === 'expensive' || sortParam === 'popular' || sortParam === 'views' ? sortParam : 'newest'
+  const sort: SortKey = sortParam === 'cheap' || sortParam === 'expensive' || sortParam === 'bestselling'
+    || sortParam === 'popular' || sortParam === 'views' ? sortParam : 'newest'
   const minPrice = searchParams.get('min') ?? ''
   const maxPrice = searchParams.get('max') ?? ''
   const inStockOnly = searchParams.get('stock') === '1'
@@ -357,6 +358,7 @@ function ProductsContent() {
               aria-label="مرتب‌سازی محصولات"
             >
               <option value="newest">جدیدترین</option>
+              <option value="bestselling">پرفروش‌ترین</option>
               <option value="popular">محبوب‌ترین</option>
               <option value="views">پربازدیدترین</option>
               <option value="cheap">ارزان‌ترین</option>

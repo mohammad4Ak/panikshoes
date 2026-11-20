@@ -44,10 +44,14 @@ async function insertFixtures(tx) {
   await tx.$executeRaw`CREATE TEMP TABLE "Category" (LIKE public."Category" INCLUDING DEFAULTS) ON COMMIT DROP`
   await tx.$executeRaw`CREATE TEMP TABLE "Product" (LIKE public."Product" INCLUDING DEFAULTS) ON COMMIT DROP`
   await tx.$executeRaw`CREATE TEMP TABLE "ProductReview" (LIKE public."ProductReview" INCLUDING DEFAULTS) ON COMMIT DROP`
+  await tx.$executeRaw`CREATE TEMP TABLE "Order" (LIKE public."Order" INCLUDING DEFAULTS) ON COMMIT DROP`
+  await tx.$executeRaw`CREATE TEMP TABLE "OrderItem" (LIKE public."OrderItem" INCLUDING DEFAULTS) ON COMMIT DROP`
   const [guard] = await tx.$queryRaw`SELECT
     'pg_temp."Product"'::regclass = '"Product"'::regclass
     AND 'pg_temp."Category"'::regclass = '"Category"'::regclass
-    AND 'pg_temp."ProductReview"'::regclass = '"ProductReview"'::regclass AS "isolated"`
+    AND 'pg_temp."ProductReview"'::regclass = '"ProductReview"'::regclass
+    AND 'pg_temp."Order"'::regclass = '"Order"'::regclass
+    AND 'pg_temp."OrderItem"'::regclass = '"OrderItem"'::regclass AS "isolated"`
   assert.equal(guard.isolated, true)
 
   await tx.$executeRaw`INSERT INTO pg_temp."Category" ("id", "name", "slug")
@@ -84,6 +88,52 @@ async function insertFixtures(tx) {
     ('review-4', 'model-49', 'reader-a', 4, 'APPROVED', ${now}),
     ('review-5', 'model-02', 'reader-a', 5, 'PENDING', ${now}),
     ('review-6', 'model-02', 'reader-b', 2, 'APPROVED', ${now})`
+}
+
+async function testBestselling(tx, catalog, ids) {
+  await tx.$executeRaw`INSERT INTO pg_temp."Order"
+    ("id", "userId", "total", "status", "verified", "paymentStatus", "address", "phone", "createdAt", "updatedAt")
+    VALUES
+      ('processing', 'buyer', 79, 'PROCESSING', TRUE, 'PAID', '', '', ${now}, ${now}),
+      ('shipping', 'buyer', 18, 'SHIPPED', TRUE, 'PAID', '', '', ${now}, ${now}),
+      ('delivered', 'buyer', 8000, 'DELIVERED', TRUE, 'PAID', '', '', ${now}, ${now}),
+      ('legacy', 'buyer', 2, 'PENDING', TRUE, 'UNPAID', '', '', '2024-04-15 00:00:00', ${now}),
+      ('unverified', 'buyer', 200, 'PENDING', FALSE, 'AWAITING_REVIEW', '', '', ${now}, ${now}),
+      ('cancelled', 'buyer', 180, 'CANCELLED', TRUE, 'PAID', '', '', ${now}, ${now}),
+      ('expired', 'buyer', 160, 'CANCELLED', FALSE, 'EXPIRED', '', '', ${now}, ${now})`
+  await tx.$executeRaw`INSERT INTO pg_temp."OrderItem"
+    ("id", "orderId", "productId", "variantId", "quantity", "size", "color", "price")
+    VALUES
+      ('line-1', 'processing', 'model-50', 'black-38', 4, 38, 'مشکی', 1),
+      ('line-2', 'processing', 'model-50', 'green-40', 3, 40, 'سبز', 1),
+      ('line-3', 'legacy', 'model-50', NULL, 2, 38, 'مشکی', 1),
+      ('line-4', 'processing', 'model-49', NULL, 8, 38, 'مشکی', 9),
+      ('line-5', 'shipping', 'model-48', NULL, 8, 38, 'مشکی', 1),
+      ('line-6', 'delivered', 'model-51', NULL, 8, 38, 'مشکی', 1000),
+      ('line-7', 'shipping', 'model-46', NULL, 10, 38, 'مشکی', 1),
+      ('line-8', 'processing', 'model-52', NULL, 11, 38, 'مشکی', 1),
+      ('line-9', 'unverified', 'model-01', NULL, 200, 38, 'مشکی', 1),
+      ('line-10', 'cancelled', 'model-02', NULL, 180, 38, 'مشکی', 1),
+      ('line-11', 'expired', 'model-03', NULL, 160, 38, 'مشکی', 1)`
+  await tx.$executeRaw`UPDATE pg_temp."Product" SET "createdAt" = ${later(1)} WHERE "id" IN ('model-51', 'model-05')`
+
+  const sort = 'bestselling'
+  const first = await catalog({ sort })
+  const second = await catalog({ sort, page: '2' })
+  const third = await catalog({ sort, page: '3' })
+  const bestsellers = ['model-52', 'model-46', 'model-50', 'model-51', 'model-48', 'model-49']
+  const remaining = Array.from({ length: 52 }, (_, index) => modelId(index + 1))
+    .filter(id => id !== 'model-05' && !bestsellers.includes(id))
+  assert.deepEqual([first.items.length, second.items.length, third.items.length], [24, 24, 4])
+  assert.deepEqual([...ids(first), ...ids(second), ...ids(third)], [...bestsellers, 'model-05', ...remaining])
+  assert.equal(first.total, 52)
+
+  const inStockDaily = await catalog({ sort, cat: 'daily', stock: '1', min: '1000' })
+  assert.deepEqual(ids(inStockDaily).slice(0, 3), ['model-50', 'model-51', 'model-48'])
+  const card = first.items.find(item => item.id === 'model-50')
+  const [ordinaryCard] = (await catalog({ q: 'pnk-50' })).items
+  assert.deepEqual(card, ordinaryCard, 'Bestselling should not add internal sales information to cards')
+  console.log('PASS all-time paid quantities across variants, cancellation exclusions and ranked pagination')
 }
 
 async function testCatalog() {
@@ -136,6 +186,7 @@ async function testCatalog() {
       await assert.rejects(catalog({ q: 'x'.repeat(201) }), { status: 400 })
       await assert.rejects(catalog({ page: '0' }), { status: 400 })
       console.log('PASS approved-only ratings, view ordering, localized search and input bounds')
+      await testBestselling(tx, catalog, ids)
       throw rollback
     }, { timeout: 20_000 })
     throw new Error('Catalog fixture transaction unexpectedly committed')

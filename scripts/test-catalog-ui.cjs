@@ -882,9 +882,10 @@ const sortedProducts = [
   { ...shoe, id: 'no-feedback', ratingAverage: 0, ratingCount: 0, viewCount: 0 },
 ]
 
-for (const [sort, expected] of [
-  ['popular', ['highest-rated', 'more-reviews', 'stable-rated-tie', 'latest', 'most-viewed', 'no-feedback']],
-  ['views', ['most-viewed', 'more-reviews', 'stable-rated-tie', 'highest-rated', 'latest', 'no-feedback']],
+for (const [sort, label, expected] of [
+  ['popular', 'محبوب‌ترین', ['highest-rated', 'more-reviews', 'stable-rated-tie', 'latest', 'most-viewed', 'no-feedback']],
+  ['views', 'پربازدیدترین', ['most-viewed', 'more-reviews', 'stable-rated-tie', 'highest-rated', 'latest', 'no-feedback']],
+  ['bestselling', 'پرفروش‌ترین', ['no-feedback', 'latest', 'most-viewed', 'highest-rated', 'more-reviews', 'stable-rated-tie']],
 ]) {
   test('Catalog sends bookmarked ' + sort + ' sorting and preserves the server order and rating values', async () => {
     const rows = expected.map((id) => sortedProducts.find((product) => product.id === id))
@@ -895,8 +896,7 @@ for (const [sort, expected] of [
     assert.equal(sortSelect(app).props.value, sort)
     assert.equal(cards(app)[0].props.product.ratingAverage, sortedProducts.find((product) => product.id === expected[0]).ratingAverage)
     assert.equal(cards(app)[0].props.product.ratingCount, sortedProducts.find((product) => product.id === expected[0]).ratingCount)
-    assert.ok(nodes(sortSelect(app)).some((node) => node.type === 'option' && node.props.value === 'popular' && text(node) === 'محبوب‌ترین'))
-    assert.ok(nodes(sortSelect(app)).some((node) => node.type === 'option' && node.props.value === 'views' && text(node) === 'پربازدیدترین'))
+    assert.ok(nodes(sortSelect(app)).some((node) => node.type === 'option' && node.props.value === sort && text(node) === label))
     app.unmount()
   })
 }
